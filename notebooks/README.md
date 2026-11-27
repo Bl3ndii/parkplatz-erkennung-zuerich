@@ -1,0 +1,41 @@
+# Notebooks: Übersicht und Reihenfolge
+
+Jedes Notebook macht genau eine Sache. Es beginnt mit einem Erklärteil (Ziel, warum, Ein- und Ausgaben) und zeigt jeden Arbeitsschritt nach demselben Muster: kurzer Überblick → Tabelle vorher → Schritt → Tabelle nachher (mit Anzahl vorher → nachher) → Karte oder Bild. Geschrieben für Studierende im ersten Semester Data Science.
+
+| Nr. | Notebook | Inhalt | Laufzeit | ML-Pipeline-Schritt |
+| --- | --- | --- | --- | --- |
+| – | `rohdaten_herunterladen` | **einmalig, ausserhalb der Reihe:** lädt alle Rohdaten, die die Notebooks lesen: Stadtkreise, amtliche Parkplatzdaten beider Jahre (DAV 2025, Strassenparkplätze 2021), Amtliche Vermessung, Liegenschaften und die Luftbilder über dem Gebiet; Manifest mit Fingerabdruck; am Schluss eine Kontrolle, ob alles da ist | Minuten (nur wenn Daten fehlen) | Daten |
+| – | `formeln_pruefen` | **ausserhalb der Reihe:** rechnet jede selbst geschriebene Formel (18 Prüfungen: IoU, MAE, Bootstrap über Blöcke, Kreuzentropie, Schwelle, mittlere Tiefe, Platz-Äquivalente, Zerlegung des Deltas, Rundung …) gegen eine anerkannte Bibliothek nach; braucht keine Projektdaten | Sekunden | Qualitätssicherung |
+| – | `ground_truth_erfassen` | **ausserhalb der Reihe, Handarbeit des Auftraggebers:** teilt das Gebiet in Ausschnitte von 51,2 m, berechnet Vorschläge (DAV-Punkte, Baumkrone aus dem Infrarot), startet das Werkzeug im Browser zum Setzen und Beurteilen der Parkfelder in den Bildern 2021 und 2024/25, zählt den Stand aus (Aufwand, Änderungen an Vorschlägen, Kontroll-Ausschnitte ohne Vorschlag) | 10 min beim ersten Lauf (Bilder schneiden), danach Sekunden | Daten (Ground Truth) |
+| – | `ground_truth_pruefen` | **ausserhalb der Reihe, nur lesend:** prüft die von Hand gesetzten Felder (Fortschritt, schnell abgeschlossene leere Ausschnitte, was aus den Vorschlägen wurde, Kontroll-Ausschnitte, Parkart gegen den Abstand der Ringe, Grundstück unter dem Feld). Ändert die Datei des Auftraggebers nicht; offene Fragen daraus stehen in `01b`, Abschnitt 10 | 1 min | Daten (Ground Truth) |
+| – | `stichprobe_strassenraum` | **ausserhalb der Reihe, braucht ein Urteil des Auftraggebers:** zieht 30 neu gesetzte Felder im Strassenraum ohne amtliches Objekt in 3 m, zeigt sie in beiden Bildern und zählt die eingetragenen Urteile aus (`01b`, 10.3 und 11.2) | 1 min | Daten (Ground Truth) |
+| 00 | `00_gebiet_und_daten` | allgemeine Einstellungen (Gebiet, Seed, Auflösungen), Gebiet bestimmen, 250-m-Rand, Vermessung zuschneiden, Abdeckung beider Luftbilder prüfen | 1 min | Daten |
+| 01 | `01_rohdaten_pruefen` | Versionen, Grafikkarte, Manifest, Rohdaten ansehen (Parkfelder, Zeitlücke, Kanäle des Luftbilds, drei Aufnahmen im Vergleich, schwierige Stellen A–H) | 1 min | 1–2 Inspektion, EDA |
+| 01b | `01b_methodik_leitfaden` | **nur Text:** Ziel und Rangordnung, Entscheide, Versuchsplan (2021 und 2024/25), Gedankenspiele zur Verdeckung, Stand der Entscheide, formale Beschreibung des Plans (Abschnitt 7), Entscheide und Nacharbeiten (Abschnitt 11), **gültiger Stand mit allen Formeln und festen Werten (Abschnitt 12)**; am Anfang eine Zeitleiste | – | 3 Vorhersageproblem |
+| 02 | `02_aufteilung` | teilt die 691 Ausschnitte in ganzen Blöcken von 204,8 m in Lernen, Validieren und Testen (60 / 15 / 25 %, geschichtet, Seed 42) – bevor ein Netz gelernt hat | Sekunden | 6 Aufteilung |
+| 03 | `03_platzmasse` | findet zu jedem Ring seine Reihe (Linie mit den meisten Ringen), bestimmt die Klasse eng/weit und misst in den Lernblöcken den typischen Abstand; Tiefe aus der Norm → Platzfläche | Sekunden | 5 Aufbereitung |
+| 04 | `04_kaestchen` | vom Ring zum Kästchen; Kategorie je Bild (sichtbar, verdeckt, Streifen …); Strassenraum oder übriger Grund; Prüfung mit Rechnung und auf dem Luftbild | 1 min | 4–5 |
+| 05 | `05_loesungsblatt_kacheln` | Lösungsblatt (0 / 1 / 255) und Kacheln für zwei Bilder × zwei Auflösungen; **Prüfung vor dem Lernen: Zählformel am Lösungsblatt** | 3 min | 4–8 |
+| 06 | `06_baseline` | einfache Schätzungen ohne Luftbild (B0, B1), Fehler auf der Validierung | Sekunden | 9 Baseline |
+| 07 | `07_training` | Dense-U-Net, Verlust, ein Lernschritt vorgeführt, vier Läufe (A/B × 5/10 cm), Lernkurven, Schwelle auf der Validierung, MLflow; Nachtrag: Lauf `A_10cm` mit 60 statt 40 Epochen (`A_10cm_lang`) | 2 min; volles Lernen ≈ 2 h | 10–12 |
+| 08 | `08_vorhersage` | wendet die vier Netze mit überlappenden Fenstern auf die Testausschnitte an → Karte der gemeldeten Parkfläche | 5 min | 14 Endprüfung |
+| 09 | `09_zaehlung` | gemeldete Fläche → Platz-Äquivalente → Anzahl je Testausschnitt; daneben Ground Truth und amtliche Daten desselben Jahres; Sonderfelder (`✕`, `?`) in eigenen Spalten | 1 min | 14 |
+| 10 | `10_auswertung` | Fläche (IoU …, Trefferquote getrennt für Sonderfelder), Anzahl (MAE, Bias, Baselines), 5 cm gegen 10 cm (Bootstrap über Blöcke), Zähltabelle, **Delta zu den amtlichen Daten** und seine Zerlegung | Sekunden | 13–14 |
+| 11 | `11_nachtrag_laenger_lernen` | **Nachtrag, zweite Auswertung der Testblöcke für einen Lauf:** das länger gelernte 10-cm-Netz (`A_10cm_lang`) neben der ersten Auswertung; drei Kontrollen zeigen, dass die Schritte dieselben sind wie in 08 bis 10. Die erste Auswertung bleibt das Ergebnis | 2 min | 14 (Gegenprobe) |
+| 12 | `12_karte_ganzes_gebiet` | **Karte, keine Prüfung:** wendet die vier Netze auf alle 691 Ausschnitte an; gemeldete Flächen, daraus Plätze als Punkte, Abgleich mit der Ground Truth; ein GeoPackage je Lauf. Drei Kontrollen: In den Testausschnitten kommt dasselbe heraus wie in 05, 08 und 09 | 10 min; mit neuer Vorhersage ≈ 40 min | 15 Anwendung |
+| 13 | `13_dashboard` | baut aus den GeoPackages eine HTML-Datei: Karte im Browser mit Legende in Alltagssprache, Umschalten (Bild, Auflösung), Suche und Herunterladen (GeoPackage, GeoJSON). Keine Kennzahlen | 1 min | 15 Anwendung |
+
+**Gemeinsame Dateien**
+- **Einstellungen** – jede wird in dem Notebook festgelegt und erklärt, das den Schritt durchführt: allgemeine in 00 (**Gebiet `KREISE`**, Seed, Auflösungen), Anteile der Aufteilung in 02, Grenzen für eng/weit und Normtiefen in 03, Kacheln, Versuche und Codes der Kategorien in 05, Epochen und Schwellen in 07, Überlappung in 08. Die gemeinsamen stehen in `einstellungen.json`, die Platzmasse in `daten/verarbeitet/platzmasse.json`.
+- **Kein verstecktes Werkzeug:** Jeder Schritt steht sichtbar im Notebook, das ihn erklärt. Jedes Notebook speichert sein Ergebnis als Datei; spätere Notebooks lesen nur Dateien (z. B. 02 → `aufteilung.csv`, 03 → `ringe.csv` und `platzmasse.json`, 04 → `kaestchen.gpkg`, 07 → `schwellen.json`, 09 → `zaehlung.csv`).
+- `netz.py` – einzige Ausnahme: der Bauplan des Netzes (Dense-U-Net), weil 07 und 08 ihn identisch brauchen; erklärt in Notebook 07.
+- `ground_truth_vorlage.html` – die Seite des Werkzeugs zum Erfassen der Ground Truth (gestartet von `ground_truth_erfassen`, Abschnitt 5).
+- `nachtlauf.py` – führt alle Notebooks der Reihe nacheinander aus (`--ab 08`, `--training`, `--karte`).
+- `dashboard_vorlage.html` – Aussehen und Bedienung des Dashboards; Notebook 13 setzt die Daten ein.
+- `quellen_liste.py` – Literaturliste; lädt die PDFs auf Wunsch von den Originalquellen.
+
+**Schalter.** Das volle Lernen startet nur mit der Umgebungsvariable `LANGLAUF=1`, der Nachtrag (`A_10cm_lang`) nur mit `NACHTRAG=1`; `nachtlauf.py --training` setzt beide. Ohne Schalter verwendet Notebook 07 die gespeicherten Lernkurven und Netze. Die Vorhersage für das ganze Gebiet (Notebook 12) startet nur mit `KARTIERUNG=1` (`--karte` oder `--training`).
+
+**Ground Truth.** Sie liegt in `daten/ground_truth/ground_truth_hand.json` und wurde vom Auftraggeber mit dem Werkzeug aus `ground_truth_erfassen` von Hand gesetzt (691 Ausschnitte, zwei Bilder). Wird sie geändert, müssen die Notebooks ab 02 neu laufen, einschliesslich des Lernens.
+
+**Frühere Durchgänge.** Pilot 1 (amtliche DAV-Daten als Lösung, vier Testzonen) ist in `PILOT1.md` beschrieben; sein Quellcode liegt nicht in diesem Repository. Die Entscheide für den jetzigen Durchgang (eigene Ground Truth, zwei Bilder, Testblöcke) stehen in `01b_methodik_leitfaden`, Abschnitt 11. Die Karte des ganzen Gebiets und das Dashboard wurden am 27.11.2026 für diesen Durchgang neu gebaut (Notebooks 12 und 13; Regeln in `01b`, Abschnitt 11.3).

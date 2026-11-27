@@ -1,0 +1,40 @@
+{
+  "KREISE": [
+    1
+  ],
+  "CRS": "EPSG:2056",
+  "SEED": 42,
+  "AUFLOESUNGEN_CM": [
+    5,
+    10
+  ],
+  "KACHEL_PX": 512,
+  "GEBIET_NAME": "kreis1",
+  "ANTEIL_LERNEN": 0.6,
+  "ANTEIL_VALIDIEREN": 0.15,
+  "SCHICHTEN": 3,
+  "RAND_TEST_M": 25,
+  "MIN_GUELTIG": 0.5,
+  "VERSUCHE": {
+    "A": {
+      "ordner": "fruehjahr_2021",
+      "kategorie": "kat_2021",
+      "name": "Frühjahr 2021"
+    },
+    "B": {
+      "ordner": "sommer_2024_25",
+      "kategorie": "kat_2024_25",
+      "name": "Sommer 2024/25"
+    }
+  },
+  "CODE": {
+    "kein Parkfeld": 0,
+    "sichtbar": 1,
+    "verdeckt, belegt": 2,
+    "verdeckt": 3,
+    "unsicher": 4,
+    "Streifen": 5,
+    "einzeln": 6,
+    "Rand um Testblock": 7
+  }
+}

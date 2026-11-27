@@ -1,0 +1,22 @@
+# Direkt verwendete Pakete mit festen Versionen (Stand 26.11.2026).
+# Vollständige Liste inklusive aller Abhängigkeiten: requirements-lock.txt
+# PyTorch mit CUDA 12.8 kommt aus dem PyTorch-Index (siehe UMGEBUNG.md).
+--extra-index-url https://download.pytorch.org/whl/cu128
+torch==2.11.0+cu128
+torchvision==0.26.0+cu128
+numpy==2.4.6
+pandas==3.1.1
+scipy==1.17.1
+geopandas==1.2.0
+shapely==2.2.0
+pyproj==3.7.2
+rasterio==1.4.4
+matplotlib==3.11.2
+pillow==13.0.0
+requests==2.34.2
+tqdm==4.70.1
+jupyterlab==4.6.6
+ipykernel==7.4.0
+nbformat==5.11.1
+nbconvert==7.17.2
+mlflow==3.18.0

@@ -1,0 +1,13 @@
+lauf,gruppe,ausschnitte,sichtbar_ground_truth,gezaehlt,erkannt,uebersehen,zusaetzlich_gemeldet,anteil_gezaehlt,anteil_erkannt
+A_5cm,lernen,467,1655,1694,1514,141,39,1.024,0.915
+A_5cm,validieren,87,345,342,286,59,29,0.991,0.829
+A_5cm,testen,137,708,664,584,124,34,0.938,0.825
+A_10cm,lernen,467,1655,1739,1518,137,26,1.051,0.917
+A_10cm,validieren,87,345,328,263,82,30,0.951,0.762
+A_10cm,testen,137,708,626,544,164,28,0.884,0.768
+B_5cm,lernen,467,1091,1175,1002,89,54,1.077,0.918
+B_5cm,validieren,87,242,237,184,58,38,0.979,0.76
+B_5cm,testen,137,500,454,394,106,33,0.908,0.788
+B_10cm,lernen,467,1091,1018,810,281,38,0.933,0.742
+B_10cm,validieren,87,242,203,148,94,20,0.839,0.612
+B_10cm,testen,137,500,395,313,187,26,0.79,0.626

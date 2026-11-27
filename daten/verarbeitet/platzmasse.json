@@ -1,0 +1,16 @@
+{
+  "eng": {
+    "breite_m": 2.5,
+    "tiefe_m": 5.0,
+    "flaeche_m2": 12.48
+  },
+  "weit": {
+    "breite_m": 5.61,
+    "tiefe_m": 1.9,
+    "flaeche_m2": 10.66
+  },
+  "ENG_M": 4.0,
+  "EINZELN_M": 9.0,
+  "TIEFE_GRENZE_M": 3.45,
+  "herkunft": "Breite: Median des Abstands zum nächsten Ring der Reihe in den Lernblöcken; Tiefe: Norm (01b, Abschnitt 1)"
+}

@@ -1,0 +1,35 @@
+# Umgebung und Caches
+.venv/
+__pycache__/
+.ipynb_checkpoints/
+
+# Rohdaten (werden mit notebooks/rohdaten_herunterladen.ipynb geladen)
+daten/roh/*
+!daten/roh/MANIFEST.csv
+
+# Zwischendaten: gross und mit den Notebooks wieder herstellbar
+# Bildausschnitte für das Werkzeug zum Erfassen (ground_truth_erfassen)
+daten/verarbeitet/gt_kacheln/
+# Kacheln und Lösung je Pixel (Notebook 05)
+daten/verarbeitet/kacheln/
+daten/verarbeitet/loesung/
+# zugeschnittene Vermessung und abgeleitete Geodaten (Notebooks 00, 01, 04)
+daten/verarbeitet/*.gpkg
+# automatische Sicherungen der Handarbeit (die Datei ground_truth_hand.json selbst wird NICHT ignoriert)
+daten/ground_truth/sicherung/
+
+# Ergebnisse, die gross sind oder Pfade dieses Rechners enthalten
+# gemeldete Masken (Notebooks 08 und 11; ganzes Gebiet: Notebook 12)
+ergebnisse/masken/
+ergebnisse/masken_gebiet/
+# gelernte Netze (Dateien über 50 MB)
+ergebnisse/modelle/
+# MLflow-Protokoll (enthält Pfade dieses Rechners)
+ergebnisse/mlflow.db
+
+# Quellen-PDFs: nur verlinkt, nicht weitergegeben (siehe DATEN_LIZENZEN.md)
+quellen/
+
+# bleibt lokal: Arbeitsordner, Skills, überholte Arbeitsnotizen
+archiv/
+.claude/

@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Parkplätze aus dem Luftbild – Zürich, __GEBIET__</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  /* Farben für den Vergleich: mit dem Prüfskript des Dataviz-Skills geprüft (auch bei Rot-Grün-Schwäche unterscheidbar).
+     "Nicht bewertet" hat keine eigene Farbe, sondern ist weiss gestrichelt: So hängt es nicht an der Farbe allein. */
+  :root {
+    --tinte: #263238;          /* Text */
+    --leise: #5f6b73;          /* Nebentext */
+    --linie: #d5dade;          /* Ränder */
+    --flaeche: #ffffff;        /* Bedienfelder */
+    --grund: #eef1f3;          /* Hover, Hintergründe */
+    --passt: #00b894;          /* Programm und Handarbeit stimmen überein */
+    --fehlt: #f2a600;          /* vom Programm übersehen */
+    --extra: #c86bfa;          /* nur vom Programm gemeldet */
+    --ring: #1d2327;           /* dunkler Rand um alle Zeichen */
+    --asphalt: #5b656c;        /* Untergrund der Zeichen in Legende und Liste: wie eine Strasse im Luftbild */
+    --schrift: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; font-family: var(--schrift); color: var(--tinte); font-size: 14px; }
+  #karte { position: fixed; inset: 0; }
+  .feld { background: var(--flaeche); border: 1px solid var(--linie); border-radius: 12px; box-shadow: 0 1px 2px rgba(29,35,39,.08), 0 4px 14px rgba(29,35,39,.08); }
+  button, input { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--tinte); outline-offset: 2px; }
+  .zeichen { width: 28px; height: 20px; flex: none; display: block; }
+  .klein { color: var(--leise); font-size: 12.5px; line-height: 1.45; margin: 8px 0 0; }
+  #legende section .klein { margin: 2px 0 0 38px; }
+
+  /* Links oben: Suche, Titel, Knopf zur Erklärung */
+  #suche { position: fixed; top: 14px; left: 14px; width: min(440px, calc(100vw - 28px)); z-index: 1000; }
+  #suche form { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 14px; }
+  #suche input { flex: 1; border: 0; outline: none; padding: 8px 0; font-size: 15px; background: transparent; }
+  #suche form button { border: 0; background: var(--tinte); color: #fff; border-radius: 8px; padding: 8px 14px; cursor: pointer; }
+  #treffer { list-style: none; margin: 6px 0 0; padding: 4px; display: none; max-height: 50vh; overflow: auto; }
+  #treffer li { padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+  #treffer li:hover, #treffer li[aria-selected="true"] { background: var(--grund); }
+  #treffer small { color: var(--leise); display: block; }
+  #kopf { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+  #titel { margin: 0; padding: 4px 11px; border-radius: 999px; background: rgba(255,255,255,.94); border: 1px solid var(--linie); font-size: 13px; }
+  #info-knopf { border-radius: 999px; padding: 4px 12px; font-size: 13px; font-weight: 600; cursor: pointer; box-shadow: none; border-color: var(--tinte); }
+  #info-knopf:hover { background: var(--grund); }
+
+  /* Links unten: Legende */
+  #legende { position: fixed; left: 14px; bottom: 34px; width: min(348px, calc(100vw - 28px)); z-index: 1000; max-height: calc(100vh - 150px); overflow: auto; }
+  #legende summary { font-size: 14px; font-weight: 600; cursor: pointer; padding: 10px 14px; }
+  #legende .inhalt { padding: 0 14px 12px; }
+  #legende h3 { font-size: 13px; font-weight: 600; margin: 10px 0 2px; line-height: 1.35; }
+  #legende section:first-child h3 { margin-top: 0; }
+  #legende ul { list-style: none; margin: 0; padding: 0; }
+  #legende li { display: grid; grid-template-columns: 28px 1fr; gap: 10px; align-items: start; padding: 4px 0; font-size: 13px; line-height: 1.38; }
+  #legende li b { font-weight: 600; }
+  #legende [hidden] { display: none; }
+
+  /* Rechts oben: Einstellungen */
+  #ebenen { position: fixed; top: 14px; right: 14px; width: 316px; z-index: 1000; padding: 14px; max-height: calc(100vh - 62px); overflow: auto; }
+  #ebenen h2 { font-size: 13px; font-weight: 600; margin: 0 0 6px; }
+  #ebenen h2.abstand { margin-top: 14px; }
+  .umschalter { display: grid; grid-template-columns: 1fr 1fr; background: var(--grund); border-radius: 9px; padding: 3px; margin-bottom: 10px; }
+  .umschalter button { border: 0; background: transparent; padding: 7px 0; border-radius: 7px; cursor: pointer; }
+  .umschalter button[aria-pressed="true"] { background: var(--flaeche); box-shadow: 0 1px 3px rgba(29,35,39,.18); font-weight: 600; }
+  .gruppe { margin: 6px 0 8px; }
+  .gruppe > span { display: block; color: var(--leise); font-size: 12.5px; margin-bottom: 2px; }
+  label.ebene { display: grid; grid-template-columns: 18px 28px 1fr auto; align-items: center; gap: 8px; padding: 2px; cursor: pointer; }
+  label.ebene .zahl { color: var(--leise); font-variant-numeric: tabular-nums; }
+  .hinweis { margin: 2px 0 0; padding: 9px 11px; background: var(--grund); border-radius: 8px; font-size: 12.5px; line-height: 1.45; }
+  .hinweis b { font-weight: 600; }
+  .knopfzeile { display: flex; gap: 8px; }
+  .knopf { flex: 1; border: 1px solid var(--linie); background: var(--flaeche); border-radius: 8px; padding: 8px 4px; cursor: pointer; text-align: center; text-decoration: none; color: inherit; font-size: 13.5px; white-space: nowrap; }
+  .knopf:hover { background: var(--grund); }
+
+  /* Erklärung: Feld, das von rechts hereinfährt */
+  #info { position: fixed; top: 0; right: 0; bottom: 0; width: min(480px, 100vw); z-index: 1100; transform: translateX(100%);
+          transition: transform .22s ease; border-radius: 0; border-width: 0 0 0 1px; display: flex; flex-direction: column; visibility: hidden; }
+  #info[data-offen="true"] { transform: none; visibility: visible; }
+  #info header { display: flex; align-items: center; justify-content: space-between; padding: 16px 18px; border-bottom: 1px solid var(--linie); }
+  #info header h2 { margin: 0; font-size: 17px; }
+  #info header button { border: 0; background: transparent; font-size: 22px; cursor: pointer; line-height: 1; padding: 4px 8px; }
+  #info nav { display: flex; gap: 4px; padding: 10px 14px 0; flex-wrap: wrap; }
+  #info nav button { border: 0; background: transparent; padding: 7px 10px; border-radius: 8px; cursor: pointer; color: var(--leise); }
+  #info nav button[aria-selected="true"] { background: var(--grund); color: var(--tinte); font-weight: 600; }
+  #info section { padding: 6px 18px 24px; overflow: auto; line-height: 1.55; display: none; }
+  #info section[data-aktiv="true"] { display: block; }
+  #info h3 { font-size: 14px; margin: 16px 0 4px; }
+  #info p, #info li { max-width: 68ch; }
+  #info ol, #info ul { padding-left: 20px; }
+  #info table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  #info td { border-top: 1px solid var(--linie); padding: 6px 8px 6px 0; vertical-align: top; }
+  #info code { font-size: 12.5px; background: var(--grund); padding: 1px 4px; border-radius: 4px; }
+
+  /* Fusszeile und Karte */
+  #fuss { position: fixed; left: 0; right: 0; bottom: 0; z-index: 900; background: rgba(255,255,255,.92); border-top: 1px solid var(--linie);
+          font-size: 12px; color: var(--leise); padding: 4px 14px; }
+  .leaflet-top.leaflet-right { right: 344px; }                       /* Vergrössern und Verkleinern: links neben den Einstellungen */
+  .leaflet-top.leaflet-right .leaflet-control { margin: 14px 0 0; }
+  .leaflet-control-attribution { margin-bottom: 22px !important; }
+  .leaflet-popup-content { font-family: var(--schrift); font-size: 13px; color: var(--tinte); }
+  .leaflet-popup-content table td { padding: 1px 8px 1px 0; vertical-align: top; }
+  .leaflet-popup-content b { font-weight: 600; }
+
+  @media (max-width: 720px) {
+    #ebenen { top: auto; bottom: 34px; right: 10px; left: 10px; width: auto; max-height: 42vh; }
+    #legende { left: 10px; right: 10px; width: auto; top: 112px; bottom: auto; max-height: 38vh; }
+    .leaflet-top.leaflet-right { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { #info { transition: none; } }
+</style>
+</head>
+<body>
+
+<!-- Zeichen der Karte, einmal festgelegt und in Liste, Legende und Erklärung verwendet.
+     Jedes Zeichen sitzt auf einem dunkelgrauen Feld: So sieht es aus wie auf dem Luftbild. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="z-vor_passt" viewBox="0 0 28 20"><rect width="28" height="20" rx="4" style="fill:var(--asphalt)"/><circle cx="14" cy="10" r="5" style="fill:var(--passt);stroke:var(--ring);stroke-width:1.5"/></symbol>
+    <symbol id="z-vor_extra" viewBox="0 0 28 20"><rect width="28" height="20" rx="4" style="fill:var(--asphalt)"/><circle cx="14" cy="10" r="5" style="fill:var(--extra);stroke:var(--ring);stroke-width:1.5"/></symbol>
+    <symbol id="z-gt_passt" viewBox="0 0 28 20"><rect width="28" height="20" rx="4" style="fill:var(--asphalt)"/><circle cx="14" cy="10" r="5.5" style="fill:none;stroke:var(--ring);stroke-width:5"/><circle cx="14" cy="10" r="5.5" style="fill:none;stroke:var(--passt);stroke-width:2.6"/></symbol>
+    <symbol id="z-gt_fehlt" viewBox="0 0 28 20"><rect width="28" height="20" rx="4" style="fill:var(--asphalt)"/><circle cx="14" cy="10" r="5.5" style="fill:none;stroke:var(--ring);stroke-width:5"/><circle cx="14" cy="10" r="5.5" style="fill:none;stroke:var(--fehlt);stroke-width:2.6"/></symbol>
+    <symbol id="z-gt_offen" viewBox="0 0 28 20"><rect width="28" height="20" rx="4" style="fill:var(--asphalt)"/><circle cx="14" cy="10" r="5.5" style="fill:none;stroke:var(--ring);stroke-width:5"/><circle cx="14" cy="10" r="5.5" style="fill:none;stroke:#fff;stroke-width:2.6;stroke-dasharray:3.4 3.5"/></symbol>
+    <symbol id="z-flaechen" viewBox="0 0 28 20"><rect width="28" height="20" rx="4" style="fill:var(--asphalt)"/><rect x="5" y="5" width="18" height="10" rx="1.5" style="fill:#fff;fill-opacity:.5;stroke:var(--ring);stroke-width:1.5"/></symbol>
+    <symbol id="z-flaechen_rest" viewBox="0 0 28 20"><rect width="28" height="20" rx="4" style="fill:var(--asphalt)"/><rect x="5" y="5" width="18" height="10" rx="1.5" style="fill:none;stroke:var(--ring);stroke-width:3.4"/><rect x="5" y="5" width="18" height="10" rx="1.5" style="fill:none;stroke:#fff;stroke-width:1.5;stroke-dasharray:3.5 3"/></symbol>
+    <symbol id="z-amtlich" viewBox="0 0 28 20"><rect width="28" height="20" rx="4" style="fill:var(--asphalt)"/><rect x="10" y="6" width="8" height="8" rx="1.5" style="fill:#fff;stroke:var(--ring);stroke-width:1.6"/></symbol>
+    <symbol id="z-testen" viewBox="0 0 28 20"><rect width="28" height="20" rx="4" style="fill:var(--asphalt)"/><path d="M3 10H25" style="stroke:var(--ring);stroke-opacity:.55;stroke-width:5.5"/><path d="M3 10H25" style="stroke:#fff;stroke-width:3"/></symbol>
+    <symbol id="z-validieren" viewBox="0 0 28 20"><rect width="28" height="20" rx="4" style="fill:var(--asphalt)"/><path d="M3 10H25" style="stroke:var(--ring);stroke-opacity:.55;stroke-width:4.5;stroke-dasharray:7 4"/><path d="M3 10H25" style="stroke:#fff;stroke-width:2;stroke-dasharray:7 4"/></symbol>
+    <symbol id="z-lernen" viewBox="0 0 28 20"><rect width="28" height="20" rx="4" style="fill:var(--asphalt)"/><path d="M3 10H25" style="stroke:var(--ring);stroke-opacity:.55;stroke-width:4;stroke-dasharray:2 4"/><path d="M3 10H25" style="stroke:#fff;stroke-width:1.5;stroke-dasharray:2 4"/></symbol>
+    <symbol id="z-bloecke" viewBox="0 0 28 20"><rect width="28" height="20" rx="4" style="fill:var(--asphalt)"/><rect x="5" y="4.5" width="18" height="11" style="fill:none;stroke:var(--ring);stroke-opacity:.55;stroke-width:4.5"/><rect x="5" y="4.5" width="18" height="11" style="fill:none;stroke:#fff;stroke-width:2"/></symbol>
+  </defs>
+</svg>
+
+<div id="karte" role="application" aria-label="Karte"></div>
+
+<div id="suche">
+  <form class="feld" role="search" onsubmit="event.preventDefault(); waehleTreffer(0);">
+    <input id="suchfeld" type="search" placeholder="Strasse oder Adresse suchen" autocomplete="off" aria-label="Strasse oder Adresse suchen" aria-controls="treffer">
+    <button type="submit">Suchen</button>
+  </form>
+  <ul id="treffer" class="feld" role="listbox" aria-label="Suchtreffer"></ul>
+  <div id="kopf">
+    <p id="titel">Parkplätze aus dem Luftbild, __GEBIET__ (Stadt Zürich)</p>
+    <button id="info-knopf" class="feld" type="button" aria-controls="info" aria-expanded="false">Über diese Karte</button>
+  </div>
+</div>
+
+<details id="legende" class="feld" open>
+  <summary>Legende</summary>
+  <div class="inhalt">
+    <section>
+      <h3>Punkt: vom Programm gezählter Parkplatz</h3>
+      <ul>
+        <li data-fuer="vor_passt"><svg class="zeichen" aria-hidden="true"><use href="#z-vor_passt"/></svg><span><b>bestätigt</b>: Dort hat auch ein Mensch im Luftbild ein Parkfeld markiert.</span></li>
+        <li data-fuer="vor_extra"><svg class="zeichen" aria-hidden="true"><use href="#z-vor_extra"/></svg><span><b>zusätzlich gemeldet</b>: Von Hand ist dort kein Feld markiert. Ein Irrtum des Programms oder eine Lücke der Handarbeit.</span></li>
+      </ul>
+      <p class="klein">Die Punkte zeigen, wie viele Plätze das Programm auf einer Fläche zählt, nicht wo die einzelnen Felder liegen.</p>
+    </section>
+    <section>
+      <h3>Ring: von Hand markiertes Parkfeld</h3>
+      <ul>
+        <li data-fuer="gt_passt"><svg class="zeichen" aria-hidden="true"><use href="#z-gt_passt"/></svg><span><b>erkannt</b>: Das Programm meldet mindestens die Hälfte des Felds.</span></li>
+        <li data-fuer="gt_fehlt"><svg class="zeichen" aria-hidden="true"><use href="#z-gt_fehlt"/></svg><span><b>übersehen</b>: Das Programm meldet weniger als die Hälfte des Felds.</span></li>
+        <li data-fuer="gt_offen"><svg class="zeichen" aria-hidden="true"><use href="#z-gt_offen"/></svg><span><b>nicht bewertet</b>: Im gewählten Bild verdeckt, unsicher oder ein Sonderfall.</span></li>
+      </ul>
+    </section>
+    <section>
+      <h3>Fläche: vom Programm gemeldete Parkfläche</h3>
+      <ul>
+        <li data-fuer="flaechen"><svg class="zeichen" aria-hidden="true"><use href="#z-flaechen"/></svg><span><b>gezählt</b>: Aus der Grösse der Fläche rechnet das Programm die Zahl der Plätze.</span></li>
+        <li data-fuer="flaechen_rest"><svg class="zeichen" aria-hidden="true"><use href="#z-flaechen_rest"/></svg><span><b>nicht gezählt</b>: Fläche an einer Stelle, die nicht bewertet wird.</span></li>
+      </ul>
+    </section>
+    <section>
+      <h3>Zum Vergleich</h3>
+      <ul>
+        <li data-fuer="amtlich"><svg class="zeichen" aria-hidden="true"><use href="#z-amtlich"/></svg><span><b>amtlich</b>: Parkplatz laut den offenen Daten der Stadt Zürich.</span></li>
+      </ul>
+    </section>
+    <section>
+      <h3>Gebiete: Wo ist die Karte geprüft?</h3>
+      <ul>
+        <li data-fuer="bloecke"><svg class="zeichen" aria-hidden="true"><use href="#z-testen"/></svg><span><b>Prüfgebiet</b>: Hier wurde gemessen, wie gut das Programm zählt.</span></li>
+        <li data-fuer="bloecke"><svg class="zeichen" aria-hidden="true"><use href="#z-lernen"/></svg><span><b>Lerngebiet</b>: Hier hat das Programm geübt. Es kennt die Lösung.</span></li>
+        <li data-fuer="bloecke"><svg class="zeichen" aria-hidden="true"><use href="#z-validieren"/></svg><span><b>Einstellgebiet</b>: Hier wurden zwei Einstellungen des Programms gewählt.</span></li>
+      </ul>
+    </section>
+    <p class="klein" id="legende-leer" hidden>Es ist nichts eingeschaltet. Rechts unter «Was die Karte zeigt» ein Häkchen setzen.</p>
+  </div>
+</details>
+
+<div id="ebenen" class="feld" aria-label="Einstellungen der Karte">
+  <h2>Luftbild</h2>
+  <div class="umschalter" role="group" aria-label="Luftbild" id="wahl-bild">
+    <button type="button" data-versuch="A" aria-pressed="true">Frühjahr 2021</button>
+    <button type="button" data-versuch="B" aria-pressed="false">Sommer 2024/25</button>
+  </div>
+  <h2>Auflösung: Grösse eines Bildpunkts am Boden</h2>
+  <div class="umschalter" role="group" aria-label="Auflösung" id="wahl-cm">
+    <button type="button" data-cm="5" aria-pressed="true">5 cm</button>
+    <button type="button" data-cm="10" aria-pressed="false">10 cm</button>
+  </div>
+  <p class="hinweis"><b>Geprüft ist die Karte nur in den Prüfgebieten</b> (kräftig umrandet). Dort zählt das Programm je nach Bild und Auflösung __UNTERZAEHLUNG__ zu wenig. In den übrigen Gebieten hat es geübt und kennt die Lösung.</p>
+
+  <h2 class="abstand">Was die Karte zeigt</h2>
+  <div class="gruppe"><span>Punkte: vom Programm gezählte Parkplätze</span>
+    <label class="ebene"><input type="checkbox" data-ebene="vor_passt" checked><svg class="zeichen" aria-hidden="true"><use href="#z-vor_passt"/></svg><span>bestätigt</span><span class="zahl" id="n_vor_passt"></span></label>
+    <label class="ebene"><input type="checkbox" data-ebene="vor_extra" checked><svg class="zeichen" aria-hidden="true"><use href="#z-vor_extra"/></svg><span>zusätzlich gemeldet</span><span class="zahl" id="n_vor_extra"></span></label>
+  </div>
+  <div class="gruppe"><span>Ringe: von Hand markierte Parkfelder</span>
+    <label class="ebene"><input type="checkbox" data-ebene="gt_passt" checked><svg class="zeichen" aria-hidden="true"><use href="#z-gt_passt"/></svg><span>erkannt</span><span class="zahl" id="n_gt_passt"></span></label>
+    <label class="ebene"><input type="checkbox" data-ebene="gt_fehlt" checked><svg class="zeichen" aria-hidden="true"><use href="#z-gt_fehlt"/></svg><span>übersehen</span><span class="zahl" id="n_gt_fehlt"></span></label>
+    <label class="ebene"><input type="checkbox" data-ebene="gt_offen"><svg class="zeichen" aria-hidden="true"><use href="#z-gt_offen"/></svg><span>nicht bewertet</span><span class="zahl" id="n_gt_offen"></span></label>
+  </div>
+  <div class="gruppe"><span>Flächen: vom Programm gemeldete Parkfläche</span>
+    <label class="ebene"><input type="checkbox" data-ebene="flaechen"><svg class="zeichen" aria-hidden="true"><use href="#z-flaechen"/></svg><span>gezählt</span><span class="zahl" id="n_flaechen"></span></label>
+    <label class="ebene"><input type="checkbox" data-ebene="flaechen_rest"><svg class="zeichen" aria-hidden="true"><use href="#z-flaechen_rest"/></svg><span>nicht gezählt</span><span class="zahl" id="n_flaechen_rest"></span></label>
+  </div>
+  <div class="gruppe"><span>Zum Vergleich und zur Orientierung</span>
+    <label class="ebene"><input type="checkbox" data-ebene="amtlich"><svg class="zeichen" aria-hidden="true"><use href="#z-amtlich"/></svg><span id="amtlich-name">amtliche Punkte</span><span class="zahl" id="n_amtlich"></span></label>
+    <label class="ebene"><input type="checkbox" data-ebene="bloecke" checked><svg class="zeichen" aria-hidden="true"><use href="#z-bloecke"/></svg><span>Prüf- und Lerngebiete</span><span class="zahl"></span></label>
+    <label class="ebene"><input type="checkbox" id="osm"><i></i><span>Strassenkarte statt Luftbild</span><span class="zahl"></span></label>
+  </div>
+
+  <h2 class="abstand">Daten herunterladen</h2>
+  <div class="knopfzeile">
+    <a class="knopf" id="gpkg" href="daten/parkplaetze_A_5cm.gpkg" download>GeoPackage (alles)</a>
+    <button class="knopf" type="button" id="download">GeoJSON (Auswahl)</button>
+  </div>
+  <p class="klein">GeoPackage: alle Daten zum gewählten Bild und zur Auflösung, für ein GIS (LV95, EPSG:2056). GeoJSON: nur die eingeschalteten Punkte und Ringe (WGS84). Mehr dazu unter «Über diese Karte».</p>
+</div>
+
+<aside id="info" class="feld" aria-label="Über diese Karte" data-offen="false">
+  <header><h2>Über diese Karte</h2><button type="button" id="info-zu" aria-label="Schliessen">×</button></header>
+  <nav role="tablist">
+    <button role="tab" data-teil="projekt" aria-selected="true">Projekt</button>
+    <button role="tab" data-teil="lesen" aria-selected="false">Karte lesen</button>
+    <button role="tab" data-teil="daten" aria-selected="false">Daten nutzen</button>
+    <button role="tab" data-teil="haftung" aria-selected="false">Haftung</button>
+    <button role="tab" data-teil="quellen" aria-selected="false">Quellen</button>
+  </nav>
+  <section data-teil="projekt" data-aktiv="true">
+    <h3>Ein privates Projekt</h3>
+    <p>Diese Karte gehört zu einem privaten, nicht kommerziellen Forschungsprojekt. Sie steht in keiner Verbindung zur Stadt Zürich, zum Kanton Zürich oder zu anderen Behörden und gibt keine amtlichen Zahlen wieder.</p>
+    <h3>Worum es geht</h3>
+    <p>Die Frage des Projekts: Wie gut lassen sich Parkfelder in der Stadt Zürich (__GEBIET__) aus Luftbildern zählen, und was bringt eine Auflösung von 5 cm gegenüber 10 cm?</p>
+    <p>Ein Computerprogramm (ein neuronales Netz) sucht dafür im Luftbild aufgemalte Parkfelder. Die Karte zeigt, was es findet, was es übersieht und wo es Parkfläche meldet, die von Hand nicht markiert ist. Umschalten lassen sich zwei Luftbilder (Frühjahr 2021 ohne Laub, Sommer 2024/25 mit Laub) und zwei Auflösungen (5 cm und 10 cm je Bildpunkt).</p>
+    <h3>So entsteht die Karte</h3>
+    <ol>
+      <li>Der Autor hat in __GEBIET__ __FELDER__ Felder von Hand auf den Luftbildern markiert: Parkfelder, dazu gelbe Felder mit Kreuz und Abschnitte von Parkstreifen ohne einzelne Felder. Diese Handarbeit heisst im Projekt «Ground Truth»; sie gilt als Lösung.</li>
+      <li>In den Lerngebieten hat das Programm an dieser Lösung geübt, welche Bildpunkte Parkfläche sind.</li>
+      <li>Die gemeldete Fläche geteilt durch die Fläche eines Parkplatzes ergibt die Zahl der Plätze. Gerundet wird einmal je Ausschnitt von 51,2 m Seitenlänge.</li>
+      <li>Die Punkte verteilen diese Plätze gleichmässig auf die gemeldeten Flächen.</li>
+    </ol>
+    <h3>Stand</h3>
+    <p>Version __VERSION__, Stand __STAND__. Alpha heisst: eine frühe Fassung. Die Methode läuft von den Rohdaten bis zur Karte durch und ist einmal geprüft, aber nur in __GEBIET__, und sie zählt mit bekannten Abweichungen.</p>
+    <p>Code und Dokumentation: <a href="https://github.com/Bl3ndii/parkplatz-erkennung-zuerich">github.com/Bl3ndii/parkplatz-erkennung-zuerich</a></p>
+  </section>
+  <section data-teil="lesen" data-aktiv="false">
+    <h3>Die Regeln hinter den Zeichen</h3>
+    <table>
+      <tr><td><svg class="zeichen" aria-hidden="true"><use href="#z-vor_passt"/></svg></td><td><b>Bestätigt</b>: gezählter Platz auf einer gemeldeten Fläche, in der ein sichtbares, von Hand markiertes Feld liegt (oder höchstens 1 m daneben).</td></tr>
+      <tr><td><svg class="zeichen" aria-hidden="true"><use href="#z-vor_extra"/></svg></td><td><b>Zusätzlich gemeldet</b>: gezählter Platz auf einer Fläche ohne ein solches Feld. Das kann ein Irrtum des Programms sein oder ein Feld, das bei der Handarbeit fehlt.</td></tr>
+      <tr><td><svg class="zeichen" aria-hidden="true"><use href="#z-gt_passt"/></svg></td><td><b>Erkannt</b>: von Hand markiertes, im gewählten Bild sichtbares Feld, von dem das Programm mindestens die Hälfte als Parkfläche meldet.</td></tr>
+      <tr><td><svg class="zeichen" aria-hidden="true"><use href="#z-gt_fehlt"/></svg></td><td><b>Übersehen</b>: sichtbares Feld, von dem das Programm weniger als die Hälfte meldet.</td></tr>
+      <tr><td><svg class="zeichen" aria-hidden="true"><use href="#z-gt_offen"/></svg></td><td><b>Nicht bewertet</b>: Feld, das im gewählten Bild verdeckt oder unsicher ist, ein Streifen ohne einzelne Felder oder ein einzeln stehendes Feld. Was das Programm dort meldet, zählt nicht.</td></tr>
+      <tr><td><svg class="zeichen" aria-hidden="true"><use href="#z-amtlich"/></svg></td><td><b>Amtliche Punkte</b>: zum Bild 2021 die Strassenparkplätze der Stadt (Stand 31.12.2021, ohne Blaue Zone), zum Bild 2024/25 die Parkfelder der Dienstabteilung Verkehr (Stand 2025). Sie dienen nur zum Vergleich und verändern die Farben der Punkte und Ringe nicht.</td></tr>
+    </table>
+    <h3>Wo die Karte geprüft ist</h3>
+    <p>Das Gebiet ist in Blöcke geteilt. Jeder Block hat eine Aufgabe:</p>
+    <table>
+      <tr><td><svg class="zeichen" aria-hidden="true"><use href="#z-testen"/></svg></td><td><b>Prüfgebiet</b> (im Projekt: Testblock). Das Programm hat diese Stellen beim Lernen nie gesehen. Nur hier wurde gemessen, wie gut es zählt.</td></tr>
+      <tr><td><svg class="zeichen" aria-hidden="true"><use href="#z-lernen"/></svg></td><td><b>Lerngebiet</b> (Lernblock). Hier hat das Programm geübt und kennt die Lösung. Die Karte sieht darum hier besser aus, als das Programm wirklich ist.</td></tr>
+      <tr><td><svg class="zeichen" aria-hidden="true"><use href="#z-validieren"/></svg></td><td><b>Einstellgebiet</b> (Validierblock). Hier wurde gewählt, wie lange das Programm lernt und ab welcher Sicherheit es Parkfläche meldet.</td></tr>
+    </table>
+    <p>Die genauen Kennzahlen aus den Prüfgebieten stehen in der Dokumentation des Projekts, nicht hier.</p>
+    <h3>Was man wissen muss</h3>
+    <ul>
+      <li>Das Programm zählt zu wenig: in den Prüfgebieten je nach Bild und Auflösung __UNTERZAEHLUNG__ weniger Plätze, als Felder sichtbar sind. Wie die Zahl entsteht, steht in der Dokumentation des Projekts.</li>
+      <li>Gelbe Markierungen zählen mit. Parkverbotsfelder (gelb mit Kreuz) und reservierte gelbe Felder sind als Felder markiert und werden vom Programm gemeldet. Ein Punkt ist darum nicht immer ein öffentlicher Parkplatz.</li>
+      <li>Die Handarbeit stammt aus einem Durchgang einer Person. Ein dort übersehenes Feld erscheint als «zusätzlich gemeldet», wenn das Programm es findet.</li>
+      <li>Gerechnet wird je Ausschnitt von 51,2 m. Eine Reihe, die über zwei Ausschnitte läuft, erscheint als zwei Flächen.</li>
+      <li>Sehr kleine gemeldete Flächen (unter einem halben Platz) sind nicht einzeln eingezeichnet. In der Zählung sind sie enthalten.</li>
+    </ul>
+  </section>
+  <section data-teil="daten" data-aktiv="false">
+    <h3>GeoPackage</h3>
+    <p>Eine Datei je Luftbild und Auflösung, in Schweizer Koordinaten (LV95, EPSG:2056). In QGIS: Datei ins Kartenfenster ziehen und die Ebenen auswählen. Jede Datei enthält vier Ebenen:</p>
+    <table>
+      <tr><td><code>plaetze</code><br>Punkte</td><td>Die gezählten Plätze. <code>status</code>: bestätigt oder zusätzlich gemeldet. <code>platz</code>: zum Beispiel «2 von 5» auf seiner Fläche. <code>flaeche_m2</code>: Grösse der ganzen Fläche, auf der der Punkt liegt.</td></tr>
+      <tr><td><code>gemeldete_flaechen</code><br>Polygone</td><td>Was das Programm als Parkfläche meldet. <code>teil</code>: gezählt oder nicht gezählt. <code>flaeche_m2</code>, <code>tiefe_m</code>: Grösse und mittlere Tiefe. <code>klasse</code>: eng (Felder nebeneinander, je 2,5 m breit und 5 m tief) oder weit (Felder hintereinander, je 5,6 m lang und 1,9 m tief). <code>aequivalente</code>: Fläche geteilt durch die Fläche eines Platzes, ungerundet. <code>plaetze</code>: zugeteilte Plätze. <code>bestaetigt</code>: ob ein sichtbares, von Hand markiertes Feld dazugehört.</td></tr>
+      <tr><td><code>ausschnitte</code><br>Polygone</td><td>Die Quadrate von 51,2 m, in denen gerechnet wird. <code>gezaehlt</code>: Plätze laut Programm. <code>sichtbar_ground_truth</code>: von Hand markierte, sichtbare Felder. <code>aequivalente</code>: Summe vor dem Runden. <code>aeq_kleinflaechen</code>: der Teil davon aus Flächen, die nicht einzeln gespeichert sind. <code>block</code>: Nummer des Blocks.</td></tr>
+      <tr><td><code>felder_ground_truth</code><br>Polygone</td><td>Die von Hand markierten Felder als Kästchen. <code>id</code>: Kennung des Felds. <code>status</code>: erkannt, übersehen oder nicht bewertet. <code>kategorie</code>: Zustand im gewählten Bild (sichtbar, verdeckt, unsicher und weitere). <code>form</code>: Art des Felds. <code>klasse</code>: eng, weit oder einzeln stehend, aus dem Abstand zu den Nachbarfeldern. <code>anteil_gemeldet</code>: Teil des Kästchens, den das Programm meldet (0 bis 1). <code>strassenraum</code>: ob das Feld im Strassenraum liegt. <code>x</code>, <code>y</code>: Lage des Rings.</td></tr>
+    </table>
+    <p>In allen Ebenen stehen <code>kachel</code> (Kennung des Ausschnitts) und <code>gruppe</code>: <code>testen</code> = Prüfgebiet, <code>lernen</code> = Lerngebiet, <code>validieren</code> = Einstellgebiet.</p>
+    <h3>Wichtig für eigene Auswertungen</h3>
+    <ul>
+      <li>Wer wissen will, wie gut das Programm zählt, verwendet nur Zeilen mit <code>gruppe = testen</code>. In den anderen Gebieten kennt das Programm die Lösung.</li>
+      <li>Die Punkte sind keine vermessenen Parkfelder. Verlässlich ist die Zahl je Ausschnitt (<code>gezaehlt</code>), nicht die Lage des einzelnen Punkts.</li>
+      <li>Parkverbotsfelder und reservierte gelbe Felder sind mitgezählt.</li>
+    </ul>
+    <h3>GeoJSON (Auswahl)</h3>
+    <p>Speichert die gerade eingeschalteten Punkte und Ringe zum gewählten Bild und zur gewählten Auflösung, in Längen- und Breitengraden (WGS84). Flächen sind nicht enthalten; sie stehen mit ihrem genauen Umriss im GeoPackage.</p>
+    <h3>Weitergeben</h3>
+    <p>Die Daten stehen unter CC BY 4.0: Weitergabe mit Namensnennung «Bl3ndii, parkplatz-erkennung-zuerich». Der Knopf «GeoPackage (alles)» funktioniert, wenn der Ordner <code>daten</code> neben dieser Datei liegt.</p>
+  </section>
+  <section data-teil="haftung" data-aktiv="false">
+    <h3>Ohne Gewähr</h3>
+    <p>Alle Inhalte werden ohne jede Gewähr bereitgestellt. Die Zahlen sind Schätzungen eines Pilotmodells mit bekannten, erheblichen Abweichungen; sie ersetzen keine Erhebung vor Ort.</p>
+    <p>Der Autor übernimmt keine Haftung für Schäden oder Folgen aus der Nutzung dieser Karte, der Daten oder des Codes, soweit gesetzlich zulässig. Das gilt insbesondere für Analysen, Planungen und Entscheide, die darauf beruhen. Wer die Daten weiterverwendet, prüft sie selbst und beachtet die Lizenzen der Quellen.</p>
+    <h3>Datenschutz</h3>
+    <p>Die Karte speichert nichts. Beim Anzeigen werden Kartenbilder vom Kanton Zürich oder von OpenStreetMap und die Kartenbibliothek von unpkg.com geladen; bei der Adresssuche wird nur der eingetippte Text an den Suchdienst des Bundes (geo.admin.ch) gesendet.</p>
+  </section>
+  <section data-teil="quellen" data-aktiv="false">
+    <table>
+      <tr><td>Luftbilder</td><td>Orthofoto Frühjahr 2021/22 und Sommer 2024/25, © Kanton Zürich, Amt für Raumentwicklung, Geoinformation. Open Government Data, Quelle zu nennen.</td></tr>
+      <tr><td>Von Hand markierte Felder</td><td>Vom Autor auf den Luftbildern erfasst (Ground Truth). CC BY 4.0.</td></tr>
+      <tr><td>Amtliche Punkte</td><td>Öffentlich zugängliche Parkplätze DAV (Stand 2025) und Öffentlich zugängliche Strassenparkplätze OGD (Stand 31.12.2021), Stadt Zürich. Open Data, CC0.</td></tr>
+      <tr><td>Grenzen</td><td>Stadtkreise, Stadt Zürich. Open Data, CC0.</td></tr>
+      <tr><td>Strassenkarte</td><td>© OpenStreetMap-Mitwirkende (ODbL).</td></tr>
+      <tr><td>Adresssuche</td><td>Suchdienst geo.admin.ch, swisstopo.</td></tr>
+      <tr><td>Kartenbibliothek</td><td>Leaflet 1.9.4, BSD-2-Clause.</td></tr>
+      <tr><td>Code</td><td>MIT-Lizenz. Texte, Ergebnisse und diese Karte: CC BY 4.0, Namensnennung «Bl3ndii, parkplatz-erkennung-zuerich».</td></tr>
+    </table>
+  </section>
+</aside>
+
+<div id="fuss">Privates, nicht kommerzielles Projekt. Keine amtlichen Zahlen, ohne Gewähr. Geprüft ist die Zählung nur in den Prüfgebieten. Version __VERSION__. Luftbild © Kanton Zürich.</div>
+
+<script>
+const D = __DATEN__;
+const ruhig = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const schmal = window.matchMedia("(max-width: 720px)").matches;
+const stil = getComputedStyle(document.documentElement);             // Farben stehen nur einmal: oben in den CSS-Variablen
+const farbe = name => stil.getPropertyValue("--" + name).trim();
+const FARBE = { passt: farbe("passt"), fehlt: farbe("fehlt"), extra: farbe("extra"), ring: farbe("ring"), hell: "#ffffff" };
+const GEBIET = { lernen: "Lerngebiet", validieren: "Einstellgebiet", testen: "Prüfgebiet" };
+const ROLLE = { lernen: "Hier hat das Programm geübt. Es kennt die Lösung.", validieren: "Hier wurden zwei Einstellungen des Programms gewählt.", testen: "Hier wurde gemessen, wie gut das Programm zählt." };
+const ANORDNUNG = { eng: "nebeneinander", weit: "hintereinander" };
+const zahl = n => n.toLocaleString("de-CH");
+
+// ---------- Karte und Hintergrund ----------
+const grenzen = L.latLngBounds([[D.rahmen[1], D.rahmen[0]], [D.rahmen[3], D.rahmen[2]]]);
+const karte = L.map("karte", { zoomControl: false, maxBounds: grenzen.pad(0.6), minZoom: 13, maxZoom: 21, preferCanvas: true }).fitBounds(grenzen);
+L.control.zoom({ position: "topright", zoomInTitle: "Vergrössern", zoomOutTitle: "Verkleinern" }).addTo(karte);
+const luftbild = {};
+for (const v of ["A", "B"]) {
+  luftbild[v] = L.tileLayer.wms("https://wms.zh.ch/OrthoZHWMS", { layers: D.bilder[v].wms, format: "image/jpeg", maxZoom: 21,
+    attribution: `Orthofoto ${D.bilder[v].name} © Kanton Zürich` });
+}
+const strassenkarte = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 21, maxNativeZoom: 19, attribution: "© OpenStreetMap-Mitwirkende" });
+
+// Umriss des Gebiets (dunkel mit hellem Saum, auf Luftbild und Strassenkarte sichtbar)
+L.geoJSON(D.gebiet, { interactive: false, style: { color: "#ffffff", weight: 6, opacity: 0.8, fill: false } }).addTo(karte);
+L.geoJSON(D.gebiet, { interactive: false, style: { color: FARBE.ring, weight: 2.5, fill: false } }).addTo(karte);
+
+// ---------- Ebenen ----------
+// Tabelle im Fenster, das beim Klick auf ein Zeichen aufgeht. Jede Zeile: [Merkmal, Beschriftung, Umformung für die Anzeige]
+function tabelle(p, felder) {
+  return "<table>" + felder.filter(([k]) => p[k] !== null && p[k] !== undefined && p[k] !== "")
+    .map(([k, name, zeige]) => `<tr><td>${name}</td><td><b>${zeige ? zeige(p[k]) : p[k]}</b></td></tr>`).join("") + "</table>";
+}
+const gebiet = g => GEBIET[g] || g;
+const FELDER_PLATZ = [["status", "Vergleich"], ["platz", "Platz auf dieser Fläche"], ["flaeche_m2", "Grösse der Fläche", v => v.toFixed(1) + " m²"], ["gruppe", "Gebiet", gebiet]];
+const FELDER_GT = [["status", "Vergleich"], ["kategorie", "Im gewählten Bild"], ["form", "Art des Felds"], ["anteil", "Vom Programm gemeldet", v => v + " %"], ["gruppe", "Gebiet", gebiet]];
+const FELDER_FLAECHE = [["flaeche_m2", "Grösse", v => v.toFixed(1) + " m²"], ["klasse", "Anordnung der Felder", v => ANORDNUNG[v] || v],
+                        ["aequivalente", "Grösse ÷ Fläche eines Platzes"], ["plaetze", "Zugeteilte Plätze"], ["gruppe", "Gebiet", gebiet]];
+function punkte(daten, fuellung) {
+  return L.geoJSON(daten, {
+    pointToLayer: (f, ll) => L.circleMarker(ll, { radius: 4.5, color: FARBE.ring, weight: 1.5, fillColor: fuellung, fillOpacity: 1 }),
+    onEachFeature: (f, l) => l.bindPopup(`<b>Vom Programm gezählter Parkplatz</b>${tabelle(f.properties, FELDER_PLATZ)}`)
+  });
+}
+// Ringe und gestrichelte Umrisse brauchen einen dunklen Unterrand, sonst verschwinden sie auf hellem Grund: zweite Ebene darunter
+function ringe(daten, strich, gestrichelt) {
+  const unten = L.geoJSON(daten, { interactive: false, pointToLayer: (f, ll) => L.circleMarker(ll, { radius: 6, color: FARBE.ring, weight: 5.5, fill: false }) });
+  const oben = L.geoJSON(daten, {
+    pointToLayer: (f, ll) => L.circleMarker(ll, { radius: 6, color: strich, weight: 3, fill: false, opacity: 1, dashArray: gestrichelt ? "4 4" : null, lineCap: gestrichelt ? "butt" : "round" }),
+    onEachFeature: (f, l) => l.bindPopup(`<b>Von Hand markiertes Parkfeld</b>${tabelle(f.properties, FELDER_GT)}`)
+  });
+  return L.layerGroup([unten, oben]);
+}
+// Flächen sind hell und ohne Vergleichsfarbe: Die Farbe tragen die Punkte und Ringe darauf
+function flaechen(daten, titel, gestrichelt) {
+  const fenster = (f, l) => l.bindPopup(`<b>${titel}</b>${tabelle(f.properties, FELDER_FLAECHE)}`);
+  if (!gestrichelt) return L.geoJSON(daten, { style: { color: FARBE.ring, weight: 1.5, fillColor: FARBE.hell, fillOpacity: 0.42 }, onEachFeature: fenster });
+  const unten = L.geoJSON(daten, { interactive: false, style: { color: FARBE.ring, weight: 3.5, fill: false } });
+  const oben = L.geoJSON(daten, { style: { color: FARBE.hell, weight: 1.5, dashArray: "5 4", lineCap: "butt", fillColor: FARBE.hell, fillOpacity: 0.12 }, onEachFeature: fenster });
+  return L.layerGroup([unten, oben]);
+}
+const gebaut = {};                                   // Ebenen werden erst gebaut, wenn Bild und Auflösung gewählt sind
+function ebenenVon(lauf) {
+  if (!gebaut[lauf]) {
+    const d = D.laeufe[lauf];
+    gebaut[lauf] = {
+      flaechen: flaechen(d.flaechen, "Gemeldete Parkfläche, gezählt", false),
+      flaechen_rest: flaechen(d.flaechen_rest, "Gemeldete Parkfläche, nicht gezählt", true),
+      vor_passt: punkte(d.vor_passt, FARBE.passt),
+      vor_extra: punkte(d.vor_extra, FARBE.extra),
+      gt_passt: ringe(d.gt_passt, FARBE.passt, false),
+      gt_fehlt: ringe(d.gt_fehlt, FARBE.fehlt, false),
+      gt_offen: ringe(d.gt_offen, FARBE.hell, true),
+    };
+  }
+  return gebaut[lauf];
+}
+const amtlich = {};
+for (const v of ["A", "B"]) {
+  amtlich[v] = L.geoJSON(D.amtlich[v], {
+    pointToLayer: (f, ll) => L.marker(ll, { icon: L.divIcon({ className: "", iconSize: [9, 9], html: `<div style="width:9px;height:9px;background:#fff;border:2px solid ${FARBE.ring};border-radius:2px"></div>` }) }),
+    onEachFeature: (f, l) => l.bindPopup(`<b>Parkplatz laut amtlichen Daten</b>${tabelle(f.properties, [["art", "Art"], ["ort", "Ort"]])}`)
+  });
+}
+const STIL_BLOCK = { testen: { weight: 3, dashArray: null, opacity: 1 }, validieren: { weight: 2, dashArray: "8 6", opacity: 0.95 }, lernen: { weight: 1.5, dashArray: "2 6", opacity: 0.8 } };
+const bloecke = L.layerGroup([
+  L.geoJSON(D.bloecke, { interactive: false, style: f => ({ color: FARBE.ring, weight: STIL_BLOCK[f.properties.gruppe].weight + 2.5, opacity: 0.55, fill: false, dashArray: STIL_BLOCK[f.properties.gruppe].dashArray }) }),
+  L.geoJSON(D.bloecke, { style: f => ({ color: FARBE.hell, fill: false, ...STIL_BLOCK[f.properties.gruppe] }),
+    onEachFeature: (f, l) => l.bindTooltip(`<b>${GEBIET[f.properties.gruppe]}</b> (Block ${f.properties.block}). ${ROLLE[f.properties.gruppe]}`, { sticky: true }) }),
+]);
+
+let versuch = "A", cm = "5";
+const lauf = () => `${versuch}_${cm}cm`;
+const reihenfolge = ["flaechen_rest", "flaechen", "gt_offen", "gt_passt", "gt_fehlt", "vor_passt", "vor_extra"];   // Punkte über Flächen
+function an(name) { return document.querySelector(`[data-ebene="${name}"]`).checked; }
+function zeichne() {
+  for (const l of Object.values(gebaut)) for (const n of reihenfolge) karte.removeLayer(l[n]);
+  for (const v of ["A", "B"]) { karte.removeLayer(amtlich[v]); karte.removeLayer(luftbild[v]); }
+  karte.removeLayer(strassenkarte);
+  if (document.getElementById("osm").checked) strassenkarte.addTo(karte); else luftbild[versuch].addTo(karte);
+  if (an("bloecke")) bloecke.addTo(karte); else karte.removeLayer(bloecke);
+  const e = ebenenVon(lauf());
+  for (const n of reihenfolge) {
+    if (an(n)) e[n].addTo(karte);
+    document.getElementById("n_" + n).textContent = zahl(D.laeufe[lauf()][n].features.length);
+  }
+  if (an("amtlich")) amtlich[versuch].addTo(karte);
+  document.getElementById("n_amtlich").textContent = zahl(D.amtlich[versuch].features.length);
+  document.getElementById("amtlich-name").textContent = D.bilder[versuch].amtlich;
+  document.getElementById("gpkg").href = `daten/parkplaetze_${lauf()}.gpkg`;
+
+  // Legende: nur zeigen, was eingeschaltet ist
+  document.querySelectorAll("#legende [data-fuer]").forEach(z => { z.hidden = !z.dataset.fuer.split(" ").some(an); });
+  document.querySelectorAll("#legende section").forEach(s => { s.hidden = !s.querySelector("li:not([hidden])"); });
+  document.getElementById("legende-leer").hidden = !!document.querySelector("#legende li:not([hidden])");
+}
+document.querySelectorAll("[data-ebene], #osm").forEach(c => c.addEventListener("change", zeichne));
+function schalter(id, merkmal, setze) {
+  document.querySelectorAll(`#${id} button`).forEach(b => b.addEventListener("click", () => {
+    setze(b.dataset[merkmal]);
+    document.querySelectorAll(`#${id} button`).forEach(x => x.setAttribute("aria-pressed", x === b));
+    zeichne();
+  }));
+}
+schalter("wahl-bild", "versuch", wert => { versuch = wert; });
+schalter("wahl-cm", "cm", wert => { cm = wert; });
+if (schmal) document.getElementById("legende").open = false;         // auf kleinen Bildschirmen zuerst eingeklappt
+zeichne();
+
+// ---------- Herunterladen ----------
+document.getElementById("download").addEventListener("click", () => {
+  const features = [];
+  for (const n of ["vor_passt", "vor_extra", "gt_passt", "gt_fehlt", "gt_offen"]) {
+    if (!an(n)) continue;
+    for (const f of D.laeufe[lauf()][n].features) features.push({ ...f, properties: { ...f.properties, ebene: n, lauf: lauf() } });
+  }
+  const blob = new Blob([JSON.stringify({ type: "FeatureCollection", features })], { type: "application/geo+json" });
+  const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: `parkplaetze_${lauf()}_auswahl.geojson` });
+  a.click(); URL.revokeObjectURL(a.href);
+});
+
+// ---------- Suche ----------
+const feld = document.getElementById("suchfeld"), liste = document.getElementById("treffer");
+let treffer = [], timer;
+function zeigeTreffer() {
+  liste.innerHTML = treffer.map((t, i) => `<li role="option" data-i="${i}">${t.name}<small>${t.art}</small></li>`).join("");
+  liste.style.display = treffer.length ? "block" : "none";
+  liste.querySelectorAll("li").forEach(li => li.addEventListener("click", () => waehleTreffer(+li.dataset.i)));
+}
+function waehleTreffer(i) {
+  const t = treffer[i]; if (!t) return;
+  karte.flyTo([t.lat, t.lon], t.zoom || 19, { animate: !ruhig });
+  liste.style.display = "none"; feld.value = t.name;
+}
+feld.addEventListener("input", () => {
+  clearTimeout(timer);
+  const q = feld.value.trim();
+  if (q.length < 2) { treffer = []; zeigeTreffer(); return; }
+  const klein = q.toLowerCase();
+  const lokal = D.strassen.filter(s => s.name.toLowerCase().includes(klein)).slice(0, 5).map(s => ({ ...s, art: "Strasse mit amtlichen Parkfeldern" }))
+    .concat(D.bloecke.features.filter(b => `block ${b.properties.block} ${b.properties.name} ${GEBIET[b.properties.gruppe]}`.toLowerCase().includes(klein)).slice(0, 5)
+      .map(b => ({ name: `${GEBIET[b.properties.gruppe]}, Block ${b.properties.block}`, art: "Gebiet der Karte", lat: b.properties.lat, lon: b.properties.lon, zoom: 18 })));
+  treffer = lokal; zeigeTreffer();
+  timer = setTimeout(async () => {
+    try {
+      const url = `https://api3.geo.admin.ch/rest/services/api/SearchServer?type=locations&origins=address,gg25,zipcode&limit=6&sr=2056&bbox=${D.rahmen_lv95.join(",")}&searchText=${encodeURIComponent(q)}`;
+      const antwort = await (await fetch(url)).json();
+      const bund = (antwort.results || []).map(r => ({ name: r.attrs.label.replace(/<[^>]+>/g, ""), art: "Adresse / Ort", lat: r.attrs.lat, lon: r.attrs.lon, zoom: 19 }));
+      if (feld.value.trim() === q) { treffer = lokal.concat(bund); zeigeTreffer(); }
+    } catch (e) { /* ohne Internet: nur lokale Treffer */ }
+  }, 250);
+});
+feld.addEventListener("keydown", e => { if (e.key === "Escape") { liste.style.display = "none"; } });
+
+// ---------- Erklärung ----------
+const info = document.getElementById("info"), infoKnopf = document.getElementById("info-knopf");
+function infoOffen(offen) { info.dataset.offen = offen; infoKnopf.setAttribute("aria-expanded", offen); if (offen) document.getElementById("info-zu").focus(); }
+infoKnopf.addEventListener("click", () => infoOffen(true));
+document.getElementById("info-zu").addEventListener("click", () => { infoOffen(false); infoKnopf.focus(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && info.dataset.offen === "true") { infoOffen(false); infoKnopf.focus(); } });
+document.querySelectorAll("#info nav button").forEach(b => b.addEventListener("click", () => {
+  document.querySelectorAll("#info nav button").forEach(x => x.setAttribute("aria-selected", x === b));
+  document.querySelectorAll("#info section").forEach(s => s.dataset.aktiv = s.dataset.teil === b.dataset.teil);
+}));
+</script>
+</body>
+</html>

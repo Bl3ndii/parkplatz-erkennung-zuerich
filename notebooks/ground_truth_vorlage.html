@@ -1,0 +1,680 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ground Truth erfassen</title>
+<style>
+  /* Farben: neutrales Grau um das Luftbild (verfälscht die Bildfarben nicht),
+     Ringe in Farben, die im Luftbild nicht vorkommen (Cyan, Gelb, Magenta). */
+  :root {
+    --grund: #26282a;
+    --tafel: #303336;
+    --linie: #4a4e52;
+    --text: #ecebe6;
+    --leise: #a7aba8;
+    --sichtbar: #2fe3ff;
+    --verdeckt: #ffd500;
+    --unsicher: #ff5bd6;
+    --fehlt: #ffffff;
+    --offen: #ff8a3d;
+    --fruehjahr: #d9c7a3;   /* Frühjahr 2021: ohne Laub */
+    --sommer: #6fb565;      /* Sommer 2024/25: mit Laub */
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--grund); color: var(--text);
+    font: 15px/1.45 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    display: grid; grid-template-columns: minmax(0, 1fr) 330px; overflow: hidden;
+  }
+  /* ---------- Bildbereich ---------- */
+  #buehne { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+  #kopf {
+    display: flex; align-items: baseline; gap: 18px; padding: 9px 16px;
+    border-top: 7px solid var(--fruehjahr); background: var(--tafel);
+  }
+  #kopf.sommer { border-top-color: var(--sommer); }
+  #bildname { font-size: 21px; font-weight: 650; letter-spacing: -0.01em; }
+  #bildhinweis { color: var(--leise); }
+  #blindhinweis {
+    display: none; margin-left: auto; padding: 2px 10px; border: 1.5px solid var(--verdeckt);
+    color: var(--verdeckt); border-radius: 3px; font-weight: 600;
+  }
+  #blindhinweis.an { display: block; }
+  #flaeche { position: relative; flex: 1; min-height: 0; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; }
+  #meldung {
+    position: absolute; left: 16px; bottom: 16px; max-width: 70%; padding: 9px 13px;
+    background: rgba(20, 21, 22, 0.9); border-left: 4px solid var(--offen); display: none;
+  }
+  #meldung.an { display: block; }
+  #schwebe {
+    position: absolute; pointer-events: none; padding: 5px 9px; background: rgba(20, 21, 22, 0.92);
+    border: 1px solid var(--linie); font-size: 13px; line-height: 1.35; display: none; white-space: nowrap;
+  }
+  /* ---------- Seitenleiste ---------- */
+  aside {
+    background: var(--tafel); border-left: 1px solid var(--linie); padding: 14px 16px 16px;
+    overflow-y: auto; display: flex; flex-direction: column; gap: 15px;
+  }
+  h2 { font-size: 13px; font-weight: 600; color: var(--leise); margin: 0 0 6px; }
+  #zaehler { font-size: 19px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  #balken { height: 7px; background: var(--grund); margin: 7px 0 5px; }
+  #balken div { height: 100%; width: 0; background: var(--text); }
+  #rest { color: var(--leise); font-variant-numeric: tabular-nums; }
+  table { border-collapse: collapse; width: 100%; }
+  td { padding: 3px 0; vertical-align: top; }
+  td.zahl { text-align: right; font-variant-numeric: tabular-nums; width: 3em; }
+  .zeichen { width: 30px; }
+  .zeichen svg { display: block; margin-top: 2px; }
+  .erklaerung { color: var(--leise); font-size: 13px; display: block; }
+  kbd {
+    display: inline-block; min-width: 22px; padding: 0 6px; text-align: center;
+    font: 600 12.5px/20px "Segoe UI", system-ui, sans-serif; color: var(--text);
+    background: var(--grund); border: 1px solid var(--linie); border-bottom-width: 2px; border-radius: 4px;
+  }
+  .tasten td:first-child { white-space: nowrap; padding-right: 10px; }
+  .tasten td { font-size: 13.5px; }
+  #unten { margin-top: auto; display: flex; flex-direction: column; gap: 9px; }
+  button {
+    font: inherit; font-weight: 650; color: #17191a; background: var(--text); border: 0; border-radius: 4px;
+    padding: 11px 12px; cursor: pointer; text-align: left;
+    display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  }
+  button:hover { background: #fff; }
+  button:focus-visible, canvas:focus-visible { outline: 2px solid var(--sichtbar); outline-offset: 2px; }
+  button.zweit { background: transparent; color: var(--text); border: 1px solid var(--linie); font-weight: 500; }
+  #speicher { font-size: 13px; color: var(--leise); min-height: 20px; }
+  #speicher.fehler { color: var(--offen); font-weight: 600; }
+  #herunterladen { display: none; }
+  .reihe { display: flex; gap: 8px; }
+  .reihe button { flex: 1; padding: 8px 10px; }
+  #herunterladen.an { display: block; }
+</style>
+</head>
+<body>
+
+<main id="buehne">
+  <div id="kopf">
+    <span id="bildname">Lädt …</span>
+    <span id="bildhinweis"></span>
+    <span id="blindhinweis">Kontroll-Ausschnitt: ohne Vorschlag, setze alle Felder selbst</span>
+  </div>
+  <div id="flaeche">
+    <canvas id="bild" tabindex="0" aria-label="Luftbild mit Parkfeldern"></canvas>
+    <div id="schwebe"></div>
+    <div id="meldung"></div>
+  </div>
+</main>
+
+<aside>
+  <section>
+    <div id="zaehler">Ausschnitt – von –</div>
+    <div id="balken"><div></div></div>
+    <div id="rest"></div>
+  </section>
+
+  <section>
+    <h2>Felder in diesem Ausschnitt, im gezeigten Bild</h2>
+    <table id="legende">
+      <tr><td class="zeichen"><svg width="22" height="22"><circle cx="11" cy="11" r="8" fill="none" stroke="#2fe3ff" stroke-width="2.4"/></svg></td>
+          <td><kbd>1</kbd> sichtbar<span class="erklaerung">Linien erkennbar, höchstens zwei Drittel verdeckt</span></td><td class="zahl" id="n_sichtbar">0</td></tr>
+      <tr><td class="zeichen"><svg width="22" height="22"><circle cx="11" cy="11" r="8" fill="none" stroke="#ffd500" stroke-width="2.4"/><line x1="3" y1="11" x2="19" y2="11" stroke="#ffd500" stroke-width="2.4"/></svg></td>
+          <td><kbd>2</kbd> verdeckt<span class="erklaerung">unter Baumkrone, Brücke oder Dach; oder Autos verdecken alle Linien</span></td><td class="zahl" id="n_verdeckt">0</td></tr>
+      <tr><td class="zeichen"><svg width="22" height="22"><circle cx="11" cy="11" r="8" fill="none" stroke="#ff5bd6" stroke-width="2.4" stroke-dasharray="4 3"/></svg></td>
+          <td><kbd>3</kbd> unsicher<span class="erklaerung">Baustelle, oder nicht zu deuten</span></td><td class="zahl" id="n_unsicher">0</td></tr>
+      <tr><td class="zeichen"><svg width="22" height="22"><path d="M5 5 L17 17 M17 5 L5 17" stroke="#fff" stroke-width="2.4"/></svg></td>
+          <td><kbd>4</kbd> kein Parkfeld<span class="erklaerung">freie Sicht, aber nichts aufgemalt</span></td><td class="zahl" id="n_fehlt">0</td></tr>
+      <tr id="zeile_offen"><td class="zeichen"><svg width="22" height="22"><circle cx="11" cy="11" r="8" fill="none" stroke="#ff8a3d" stroke-width="3.4"/></svg></td>
+          <td>noch offen<span class="erklaerung">Zustand für dieses Bild fehlt</span></td><td class="zahl" id="n_offen">0</td></tr>
+    </table>
+  </section>
+
+  <section>
+    <h2>Bedienung</h2>
+    <table class="tasten">
+      <tr><td>Klick ins Bild</td><td>neues Feld setzen</td></tr>
+      <tr><td>Feld ziehen</td><td>verschieben (Ring in die Mitte des Feldes)</td></tr>
+      <tr><td>Umschalt + ziehen</td><td>Rahmen um mehrere Felder: danach gemeinsam ziehen, oder eine Taste gilt für alle</td></tr>
+      <tr><td><kbd>Esc</kbd></td><td>Auswahl aufheben</td></tr>
+      <tr><td><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> <kbd>4</kbd></td><td>Zustand des Feldes unter dem Mauszeiger</td></tr>
+      <tr><td><kbd>L</kbd> <kbd>Q</kbd> <kbd>S</kbd></td><td>L längs: Autos hintereinander<br>Q quer: Autos nebeneinander<br>S schräg: schief zur Fahrbahn</td></tr>
+      <tr><td><kbd>F</kbd></td><td>Form wechseln (Einzelfeld, Feld mit Kreuz ✕, Streifen ═, unklar ?)</td></tr>
+      <tr><td>langer Kasten ohne Unterteilung</td><td>je Autolänge einen Ring setzen, dann <kbd>F</kbd> bis ═ (Streifen): wird nicht gezählt</td></tr>
+      <tr><td><kbd>Entf</kbd></td><td>Feld löschen (in keinem Bild ein Feld)</td></tr>
+      <tr><td><kbd>B</kbd></td><td>anderes Bild zeigen</td></tr>
+      <tr><td><kbd>U</kbd></td><td>letzten Schritt rückgängig</td></tr>
+      <tr><td>Mausrad</td><td>vergrössern, verkleinern</td></tr>
+      <tr><td>rechte Maustaste</td><td>Bild verschieben</td></tr>
+      <tr><td><kbd>R</kbd></td><td>ganzer Ausschnitt</td></tr>
+      <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>blättern, ohne abzuschliessen</td></tr>
+    </table>
+  </section>
+
+  <div id="unten">
+    <div id="speicher"></div>
+    <button id="herunterladen" class="zweit">Stand als Datei herunterladen</button>
+    <div class="reihe">
+      <button id="zurueck" class="zweit"><span>Vorheriger Ausschnitt</span><kbd>←</kbd></button>
+      <button id="wechsel" class="zweit"><span>Anderes Bild</span><kbd>B</kbd></button>
+    </div>
+    <button id="weiter"><span id="weitertext">Weiter</span><kbd style="color:#17191a;background:#d6d5d0;border-color:#b9b8b3">Enter</kbd></button>
+  </div>
+</aside>
+
+<script>
+"use strict";
+/* =====================================================================================
+   Werkzeug zum Erfassen der Ground Truth.
+   Daten:   GET  /stand      -> ganzer Stand (Einstellungen, Ausschnitte, Felder) als JSON
+            POST /speichern  -> ganzer Stand zurück an das Notebook (schreibt die Datei)
+            GET  /kacheln/<aufnahme>/<kachel>.jpg -> Bildausschnitt
+   Koordinaten: Jedes Feld hat x, y in LV95 (Meter). Ein Ausschnitt ist nur eine Ansicht.
+   ===================================================================================== */
+
+const FARBE = { sichtbar: "#2fe3ff", verdeckt: "#ffd500", unsicher: "#ff5bd6", "kein Parkfeld": "#ffffff", offen: "#ff8a3d" };
+const TASTE_ZUSTAND = { "1": "sichtbar", "2": "verdeckt", "3": "unsicher", "4": "kein Parkfeld" };
+const TASTE_PARKART = { l: "LPU", q: "QPU", s: "SCHPU" };
+const FORMEN = ["Einzelfeld", "gelbes Feld mit Kreuz", "Streifen ohne Einzelfelder", "unklar"];
+const BILDNAME = { "2021": "Frühjahr 2021", "2024_25": "Sommer 2024/25" };
+const PARKART_WORT = { LPU: "längs (hintereinander)", QPU: "quer (nebeneinander)", SCHPU: "schräg" };
+const RING_M = 0.9;                       // Radius des Rings in Metern
+
+let S = null;                             // ganzer Stand, wie er gespeichert wird
+let E = null;                             // Einstellungen daraus
+let kIdx = 0;                             // Nummer des gezeigten Ausschnitts
+let jahr = null;                          // gezeigte Aufnahme
+let gesehen = {};                         // welche Aufnahmen in diesem Ausschnitt schon gezeigt wurden
+let ansicht = { s: 1, ox: 0, oy: 0 };     // Bildschirm = Bildpixel * s + (ox, oy)
+let bilder = {};                          // geladene Bilder
+let unterMaus = null, gewaehlt = null;    // Feld unter dem Mauszeiger, zuletzt angeklicktes Feld
+let zug = null, schub = null;             // laufendes Verschieben eines Feldes / des Bildes
+let auswahl = new Set();                  // mehrere ausgewählte Felder (Umschalt-Taste)
+let rahmen = null;                        // laufender Auswahlrahmen
+let rueck = [];                           // Stapel für "rückgängig"
+let letzteParkart = "LPU";
+let letzteEingabe = Date.now();
+let speicherUhr = null, neuZaehler = 0;
+
+const leinwand = document.getElementById("bild");
+const stift = leinwand.getContext("2d");
+const el = id => document.getElementById(id);
+
+/* ---------- Umrechnung Welt (LV95) <-> Bildpixel <-> Bildschirm ---------- */
+function kachel() { return S.kacheln[kIdx]; }
+function bildPx() { return Math.round((E.kachel_m + 2 * E.rand_m) / E.pixel_m); }
+function ecke(k) { return { xl: k.i * E.kachel_m - E.rand_m, yo: (k.j + 1) * E.kachel_m + E.rand_m }; }
+function weltZuSchirm(x, y) {
+  const e = ecke(kachel());
+  return { sx: (x - e.xl) / E.pixel_m * ansicht.s + ansicht.ox, sy: (e.yo - y) / E.pixel_m * ansicht.s + ansicht.oy };
+}
+function schirmZuWelt(sx, sy) {
+  const e = ecke(kachel());
+  return { x: e.xl + (sx - ansicht.ox) / ansicht.s * E.pixel_m, y: e.yo - (sy - ansicht.oy) / ansicht.s * E.pixel_m };
+}
+function imKern(f, k) {      // gehört das Feld zum Ausschnitt selbst (ohne Rand)?
+  return f.x >= k.i * E.kachel_m && f.x < (k.i + 1) * E.kachel_m && f.y >= k.j * E.kachel_m && f.y < (k.j + 1) * E.kachel_m;
+}
+function inAnsicht(f, k) {   // liegt das Feld im gezeigten Bild (mit Rand)?
+  const e = ecke(k), w = E.kachel_m + 2 * E.rand_m;
+  return f.x >= e.xl && f.x <= e.xl + w && f.y <= e.yo && f.y >= e.yo - w;
+}
+function zeigbar(f) { return !f.geloescht && !f.verborgen; }
+
+/* ---------- Laden ---------- */
+async function start() {
+  const antwort = await fetch("/stand");
+  S = await antwort.json();
+  E = S.einstellungen;
+  neuZaehler = S.felder.filter(f => f.herkunft === "neu").length;
+  const erste = S.kacheln.findIndex(k => k.status !== "fertig");
+  const wunsch = new URLSearchParams(location.search);                 // z. B. ?kachel=k_52416_24355&bild=2024_25 öffnet genau diesen Ausschnitt
+  const gewuenscht = S.kacheln.findIndex(k => k.id === wunsch.get("kachel"));
+  geheZu(gewuenscht >= 0 ? gewuenscht : (erste < 0 ? 0 : erste));
+  if (E.aufnahmen.includes(wunsch.get("bild"))) zeigeJahr(wunsch.get("bild"));
+  if (erste < 0) melde("Alle Ausschnitte sind abgeschlossen. Mit ← und → kannst du sie nochmals ansehen.");
+  setInterval(zeitZaehlen, 1000);
+  if (new URLSearchParams(location.search).get("selbsttest")) selbsttest();
+}
+
+function ladeBild(k, a) {
+  const name = a + "/" + k.id;
+  if (!bilder[name]) {
+    const b = new Image();
+    b.onload = zeichne;
+    b.src = "/kacheln/" + name + ".jpg";
+    bilder[name] = b;
+  }
+  return bilder[name];
+}
+
+function geheZu(nummer) {
+  kIdx = (nummer + S.kacheln.length) % S.kacheln.length;
+  gesehen = {};
+  rueck = [];
+  unterMaus = gewaehlt = null;
+  auswahl.clear(); rahmen = null;
+  zeigeJahr(E.aufnahmen[0]);
+  ganzeAnsicht();
+  const naechste = S.kacheln[(kIdx + 1) % S.kacheln.length];        // nächsten Ausschnitt schon laden
+  E.aufnahmen.forEach(a => ladeBild(naechste, a));
+  melde("");
+}
+
+function zeigeJahr(a) {
+  jahr = a;
+  gesehen[a] = true;
+  ladeBild(kachel(), a);
+  zeichne();
+}
+
+function ganzeAnsicht() {
+  const r = leinwand.getBoundingClientRect(), n = bildPx();
+  ansicht.s = Math.min(r.width, r.height) / n;
+  ansicht.ox = (r.width - n * ansicht.s) / 2;
+  ansicht.oy = (r.height - n * ansicht.s) / 2;
+  zeichne();
+}
+
+/* ---------- Zeichnen ---------- */
+function zeichne() {
+  if (!S) return;
+  const r = leinwand.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  if (leinwand.width !== Math.round(r.width * dpr) || leinwand.height !== Math.round(r.height * dpr)) {
+    leinwand.width = Math.round(r.width * dpr); leinwand.height = Math.round(r.height * dpr);
+  }
+  stift.setTransform(dpr, 0, 0, dpr, 0, 0);
+  stift.clearRect(0, 0, r.width, r.height);
+  const k = kachel(), n = bildPx(), b = ladeBild(k, jahr);
+  stift.imageSmoothingEnabled = ansicht.s < 1.5;                     // stark vergrössert: Pixel scharf zeigen
+  if (b.complete && b.naturalWidth) stift.drawImage(b, ansicht.ox, ansicht.oy, n * ansicht.s, n * ansicht.s);
+  else { stift.fillStyle = "#3a3d40"; stift.fillRect(ansicht.ox, ansicht.oy, n * ansicht.s, n * ansicht.s); }
+
+  // Rand abdunkeln, Kern mit gestrichelter Linie umranden
+  const rand = E.rand_m / E.pixel_m * ansicht.s, kern = E.kachel_m / E.pixel_m * ansicht.s;
+  stift.fillStyle = "rgba(0,0,0,0.30)";
+  stift.beginPath();
+  stift.rect(ansicht.ox, ansicht.oy, n * ansicht.s, n * ansicht.s);
+  stift.rect(ansicht.ox + rand, ansicht.oy + rand, kern, kern);
+  stift.fill("evenodd");
+  stift.setLineDash([7, 5]); stift.lineWidth = 1.2; stift.strokeStyle = "rgba(255,255,255,0.75)";
+  stift.strokeRect(ansicht.ox + rand, ansicht.oy + rand, kern, kern);
+  stift.setLineDash([]);
+
+  for (const f of S.felder) if (zeigbar(f) && inAnsicht(f, k)) zeichneFeld(f);
+  if (rahmen) {                                                      // Auswahlrahmen
+    stift.setLineDash([4, 3]); stift.lineWidth = 1.5; stift.strokeStyle = "#ffffff";
+    stift.strokeRect(rahmen.x0, rahmen.y0, rahmen.x1 - rahmen.x0, rahmen.y1 - rahmen.y0);
+    stift.setLineDash([]);
+  }
+  aktualisiereLeiste();
+}
+
+function zeichneFeld(f) {
+  const p = weltZuSchirm(f.x, f.y), z = f.zustand[jahr], farbe = FARBE[z] || FARBE.offen;
+  const radius = Math.max(7, RING_M / E.pixel_m * ansicht.s);
+  const betont = f === unterMaus || f === gewaehlt;
+  const strich = (z === "offen" ? 3.4 : 2.2) + (betont ? 1.4 : 0);
+  const male = (breite, stil) => {
+    stift.lineWidth = breite; stift.strokeStyle = stil; stift.beginPath();
+    if (z === "kein Parkfeld") {
+      const d = radius * 0.72;
+      stift.moveTo(p.sx - d, p.sy - d); stift.lineTo(p.sx + d, p.sy + d);
+      stift.moveTo(p.sx + d, p.sy - d); stift.lineTo(p.sx - d, p.sy + d);
+    } else {
+      stift.arc(p.sx, p.sy, radius, 0, 2 * Math.PI);
+      if (z === "verdeckt") { stift.moveTo(p.sx - radius, p.sy); stift.lineTo(p.sx + radius, p.sy); }
+    }
+    stift.stroke();
+  };
+  if (auswahl.has(f)) {                                              // ausgewählt: weisser Aussenring
+    stift.lineWidth = 2; stift.strokeStyle = "#ffffff"; stift.beginPath();
+    stift.arc(p.sx, p.sy, radius + 5, 0, 2 * Math.PI); stift.stroke();
+  }
+  male(strich + 3, "rgba(0,0,0,0.6)");                               // dunkler Hof: Ring bleibt auf hellen Dächern sichtbar
+  if (z === "unsicher") stift.setLineDash([5, 4]);
+  male(strich, farbe);
+  stift.setLineDash([]);
+  if (ansicht.s >= 0.55 && z !== "kein Parkfeld") {               // Buchstabe der Parkart, ausser bei sehr kleiner Ansicht
+    const zeichen = f.form === "Einzelfeld" ? f.parkart[0] : (f.form === "gelbes Feld mit Kreuz" ? "✕" : f.form === "unklar" ? "?" : "═");
+    stift.font = "700 " + Math.max(10, Math.min(15, radius * 0.9)) + "px 'Segoe UI', system-ui, sans-serif";
+    stift.textAlign = "center"; stift.textBaseline = "middle";
+    const ty = z === "verdeckt" ? p.sy - radius * 0.45 : p.sy;
+    stift.lineWidth = 3; stift.strokeStyle = "rgba(0,0,0,0.7)"; stift.strokeText(zeichen, p.sx, ty);
+    stift.fillStyle = farbe; stift.fillText(zeichen, p.sx, ty);
+  }
+}
+
+function aktualisiereLeiste() {
+  const k = kachel(), fertig = S.kacheln.filter(x => x.status === "fertig").length;
+  el("zaehler").textContent = "Ausschnitt " + (kIdx + 1) + " von " + S.kacheln.length + (k.status === "fertig" ? " (abgeschlossen)" : "");
+  el("balken").firstElementChild.style.width = (100 * fertig / S.kacheln.length) + "%";
+  const zeiten = S.kacheln.filter(x => x.status === "fertig").map(x => x.zeit_s);
+  const offen = S.kacheln.length - fertig;
+  let rest = fertig + " abgeschlossen, " + offen + " offen";
+  if (zeiten.length >= 5 && offen > 0) {
+    const mittel = zeiten.reduce((a, b) => a + b, 0) / zeiten.length;
+    rest += ", noch etwa " + Math.ceil(mittel * offen / 60) + " Minuten";
+  }
+  el("rest").textContent = rest;
+  const n = { sichtbar: 0, verdeckt: 0, unsicher: 0, "kein Parkfeld": 0, offen: 0 };
+  for (const f of S.felder) if (zeigbar(f) && imKern(f, k)) n[f.zustand[jahr]] = (n[f.zustand[jahr]] || 0) + 1;
+  el("n_sichtbar").textContent = n.sichtbar; el("n_verdeckt").textContent = n.verdeckt;
+  el("n_unsicher").textContent = n.unsicher; el("n_fehlt").textContent = n["kein Parkfeld"]; el("n_offen").textContent = n.offen;
+  el("zeile_offen").style.display = n.offen ? "" : "none";
+  el("kopf").className = jahr === E.aufnahmen[0] ? "" : "sommer";
+  el("bildname").textContent = "Bild " + BILDNAME[jahr];
+  const nGesehen = E.aufnahmen.filter(a => gesehen[a]).length;
+  el("bildhinweis").textContent = jahr === E.aufnahmen[0]
+    ? "Stimmt die Lage der Felder? Fehlt eines, ist eines zu viel?"
+    : "Welchen Zustand hat jedes Feld in diesem Bild?";
+  el("bildhinweis").textContent += "  (" + nGesehen + " von " + E.aufnahmen.length + " Bildern angesehen)";
+  el("blindhinweis").className = k.blind ? "an" : "";
+  el("weitertext").textContent = nGesehen < E.aufnahmen.length ? "Weiter zum Bild " + BILDNAME[E.aufnahmen.find(a => !gesehen[a])] : "Ausschnitt abschliessen";
+}
+
+function melde(text) { const m = el("meldung"); m.textContent = text; m.className = text ? "an" : ""; }
+
+/* ---------- Ändern ---------- */
+function merke() {                         // Stand der Felder für "rückgängig" festhalten
+  rueck.push(JSON.stringify(S.felder));
+  if (rueck.length > 40) rueck.shift();
+}
+function geaendert() { letzteEingabe = Date.now(); zeichne(); speichereBald(); }
+
+function feldBei(sx, sy) {                 // nächstes Feld beim Mauszeiger
+  const grenze = Math.max(12, 1.3 * RING_M / E.pixel_m * ansicht.s);
+  let bestes = null, bestD = grenze;
+  for (const f of S.felder) {
+    if (!zeigbar(f) || !inAnsicht(f, kachel())) continue;
+    const p = weltZuSchirm(f.x, f.y), d = Math.hypot(p.sx - sx, p.sy - sy);
+    if (d < bestD) { bestD = d; bestes = f; }
+  }
+  return bestes;
+}
+
+function neuesFeld(x, y) {
+  merke();
+  const f = { id: "neu_" + Date.now() + "_" + (++neuZaehler), herkunft: "neu", verborgen: false, geloescht: false,
+              x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100, parkart: letzteParkart, form: "Einzelfeld",
+              zustand: {}, vorschlag: null };
+  for (const a of E.aufnahmen) f.zustand[a] = a === jahr ? "sichtbar" : "offen";   // im anderen Bild noch zu beurteilen
+  S.felder.push(f);
+  gewaehlt = unterMaus = f;
+  geaendert();
+}
+
+function ziele() {                         // für welche Felder gilt eine Taste?
+  if (auswahl.size && (!unterMaus || auswahl.has(unterMaus))) return [...auswahl];   // die Auswahl ...
+  const f = unterMaus || gewaehlt;                                                   // ... sonst das Feld unter dem Mauszeiger
+  return f ? [f] : [];
+}
+function zeigeAuswahl() {
+  melde(auswahl.size ? auswahl.size + (auswahl.size === 1 ? " Feld" : " Felder") + " ausgewählt. Ziehen verschiebt alle gemeinsam, eine Taste gilt für alle, Esc hebt die Auswahl auf." : "");
+}
+
+function taste(e) {
+  if (!S || e.ctrlKey || e.metaKey || e.altKey) return;
+  const t = e.key.length === 1 ? e.key.toLowerCase() : e.key, liste = ziele(), f = liste[0];
+  letzteEingabe = Date.now();
+  if (TASTE_ZUSTAND[t]) {
+    if (!f) return melde("Fahre zuerst mit der Maus auf ein Feld.");
+    merke(); for (const g of liste) g.zustand[jahr] = TASTE_ZUSTAND[t];
+    if (!auswahl.size) melde(""); geaendert();
+  } else if (TASTE_PARKART[t]) {
+    if (!f) return melde("Fahre zuerst mit der Maus auf ein Feld.");
+    merke(); letzteParkart = TASTE_PARKART[t]; for (const g of liste) g.parkart = letzteParkart; geaendert();
+  } else if (t === "f") {
+    if (!f) return melde("Fahre zuerst mit der Maus auf ein Feld.");
+    merke(); const form = FORMEN[(FORMEN.indexOf(f.form) + 1) % FORMEN.length];
+    for (const g of liste) g.form = form; geaendert(); if (liste.length === 1) zeigeSchwebe(f);
+  } else if (t === "Delete" || t === "x") {
+    if (!f) return;
+    merke();
+    for (const g of liste) {
+      if (g.herkunft === "neu") S.felder.splice(S.felder.indexOf(g), 1); else g.geloescht = true;   // Vorschläge bleiben als "gelöscht" erhalten
+    }
+    unterMaus = gewaehlt = null; auswahl.clear(); zeigeAuswahl(); geaendert();
+  } else if (t === "Escape") {
+    auswahl.clear(); zeigeAuswahl(); zeichne();
+  } else if (t === "b" || t === " ") {
+    e.preventDefault();
+    zeigeJahr(E.aufnahmen[(E.aufnahmen.indexOf(jahr) + 1) % E.aufnahmen.length]);
+  } else if (t === "u") {
+    if (rueck.length) { S.felder = JSON.parse(rueck.pop()); unterMaus = gewaehlt = null; auswahl.clear(); zeigeAuswahl(); geaendert(); }
+  } else if (t === "r") {
+    ganzeAnsicht();
+  } else if (t === "Enter") {
+    e.preventDefault(); weiter();
+  } else if (t === "ArrowRight" || t === "PageDown") {
+    geheZu(kIdx + 1);
+  } else if (t === "ArrowLeft" || t === "PageUp") {
+    geheZu(kIdx - 1);
+  }
+}
+
+function weiter() {
+  const k = kachel();
+  const ungesehen = E.aufnahmen.find(a => !gesehen[a]);
+  if (ungesehen) return zeigeJahr(ungesehen);                         // zuerst beide Bilder ansehen
+  for (const a of E.aufnahmen) {                                      // jedes Feld braucht in jedem Bild einen Zustand
+    const offen = S.felder.filter(f => zeigbar(f) && imKern(f, k) && f.zustand[a] === "offen");
+    if (offen.length) {
+      zeigeJahr(a); gewaehlt = offen[0];
+      melde(offen.length + (offen.length === 1 ? " Feld hat" : " Felder haben") + " im Bild " + BILDNAME[a] + " noch keinen Zustand (oranger Ring). Fahre darauf und drücke 1, 2, 3 oder 4.");
+      return zeichne();
+    }
+  }
+  k.status = "fertig";
+  k.fertig_um = new Date().toISOString();
+  speichereJetzt();
+  const naechste = S.kacheln.findIndex((x, i) => i > kIdx && x.status !== "fertig");
+  const sonst = S.kacheln.findIndex(x => x.status !== "fertig");
+  if (naechste >= 0) geheZu(naechste);
+  else if (sonst >= 0) geheZu(sonst);
+  else { zeichne(); melde("Alle Ausschnitte sind abgeschlossen. Der Stand ist gespeichert; du kannst das Fenster schliessen."); }
+}
+
+/* ---------- Maus ---------- */
+function mausPos(e) { const r = leinwand.getBoundingClientRect(); return { sx: e.clientX - r.left, sy: e.clientY - r.top }; }
+
+leinwand.addEventListener("mousedown", e => {
+  const m = mausPos(e); letzteEingabe = Date.now(); leinwand.focus();
+  if (e.button === 1 || e.button === 2) { schub = { sx: m.sx, sy: m.sy, ox: ansicht.ox, oy: ansicht.oy }; return; }
+  if (e.button !== 0) return;
+  const f = feldBei(m.sx, m.sy);
+  if (e.shiftKey) {                                                   // Umschalt-Taste: auswählen statt bearbeiten
+    if (f) { auswahl.has(f) ? auswahl.delete(f) : auswahl.add(f); zeigeAuswahl(); zeichne(); }
+    else rahmen = { x0: m.sx, y0: m.sy, x1: m.sx, y1: m.sy };
+    return;
+  }
+  zug = { feld: f, sx: m.sx, sy: m.sy, bewegt: false, dx: 0, dy: 0, gruppe: [] };
+  if (f) {
+    const p = weltZuSchirm(f.x, f.y);
+    zug.dx = p.sx - m.sx; zug.dy = p.sy - m.sy;                        // Abstand Mauszeiger -> Feldmitte: das Feld springt beim Ziehen nicht
+    if (!auswahl.has(f)) { auswahl.clear(); zeigeAuswahl(); }         // ein anderes Feld gepackt: Auswahl aufheben
+    zug.gruppe = (auswahl.size ? [...auswahl] : [f]).map(g => ({ feld: g, x: g.x, y: g.y }));   // Ausgangslage aller mitbewegten Felder
+    zug.x = f.x; zug.y = f.y;
+    gewaehlt = f; zeichne();
+  }
+});
+window.addEventListener("mousemove", e => {
+  if (!S) return;
+  const m = mausPos(e);
+  if (schub) { ansicht.ox = schub.ox + m.sx - schub.sx; ansicht.oy = schub.oy + m.sy - schub.sy; return zeichne(); }
+  if (rahmen) { rahmen.x1 = m.sx; rahmen.y1 = m.sy; return zeichne(); }
+  if (zug && zug.feld) {
+    if (!zug.bewegt && Math.hypot(m.sx - zug.sx, m.sy - zug.sy) > 4) { zug.bewegt = true; merke(); }
+    if (zug.bewegt) {
+      const w = schirmZuWelt(m.sx + zug.dx, m.sy + zug.dy);
+      const vx = w.x - zug.x, vy = w.y - zug.y;                        // Verschiebung des gepackten Feldes in Metern
+      for (const g of zug.gruppe) {                                    // alle mitbewegten Felder um dieselbe Strecke
+        g.feld.x = Math.round((g.x + vx) * 100) / 100; g.feld.y = Math.round((g.y + vy) * 100) / 100;
+      }
+      return zeichne();
+    }
+  }
+  if (e.target === leinwand) {
+    const f = feldBei(m.sx, m.sy);
+    if (f !== unterMaus) { unterMaus = f; zeichne(); }
+    zeigeSchwebe(f, m);
+  } else if (unterMaus) { unterMaus = null; zeigeSchwebe(null); zeichne(); }
+});
+window.addEventListener("mouseup", e => {
+  if (schub) { schub = null; return; }
+  if (rahmen) {                                                       // Rahmen losgelassen: alles darin auswählen
+    const l = Math.min(rahmen.x0, rahmen.x1), r = Math.max(rahmen.x0, rahmen.x1), o = Math.min(rahmen.y0, rahmen.y1), u = Math.max(rahmen.y0, rahmen.y1);
+    for (const f of S.felder) {
+      if (!zeigbar(f) || !inAnsicht(f, kachel())) continue;
+      const p = weltZuSchirm(f.x, f.y);
+      if (p.sx >= l && p.sx <= r && p.sy >= o && p.sy <= u) auswahl.add(f);
+    }
+    rahmen = null; zeigeAuswahl(); return zeichne();
+  }
+  if (!zug) return;
+  const m = mausPos(e);
+  if (zug.feld && zug.bewegt) geaendert();
+  else if (!zug.feld && auswahl.size) { auswahl.clear(); zeigeAuswahl(); zeichne(); }   // Klick ins Leere hebt die Auswahl auf
+  else if (!zug.feld && e.target === leinwand && Math.hypot(m.sx - zug.sx, m.sy - zug.sy) <= 4) {
+    const w = schirmZuWelt(m.sx, m.sy), n = bildPx() * ansicht.s;
+    if (m.sx >= ansicht.ox && m.sx <= ansicht.ox + n && m.sy >= ansicht.oy && m.sy <= ansicht.oy + n) neuesFeld(w.x, w.y);
+  }
+  zug = null;
+});
+leinwand.addEventListener("contextmenu", e => e.preventDefault());
+leinwand.addEventListener("wheel", e => {
+  e.preventDefault();
+  const m = mausPos(e), faktor = e.deltaY < 0 ? 1.2 : 1 / 1.2;
+  const neu = Math.min(8, Math.max(0.3, ansicht.s * faktor));
+  ansicht.ox = m.sx - (m.sx - ansicht.ox) * neu / ansicht.s;           // Punkt unter dem Mauszeiger bleibt stehen
+  ansicht.oy = m.sy - (m.sy - ansicht.oy) * neu / ansicht.s;
+  ansicht.s = neu; zeichne();
+}, { passive: false });
+
+function zeigeSchwebe(f, m) {
+  const s = el("schwebe");
+  if (!f) { s.style.display = "none"; return; }
+  s.innerHTML = "";
+  const zeilen = [PARKART_WORT[f.parkart] + (f.form === "Einzelfeld" ? "" : ", " + f.form) + (f.herkunft === "neu" ? " (von dir gesetzt)" : "")];
+  for (const a of E.aufnahmen) zeilen.push(BILDNAME[a] + ": " + f.zustand[a]);
+  for (const z of zeilen) { const d = document.createElement("div"); d.textContent = z; s.appendChild(d); }
+  if (m) { s.style.left = (m.sx + 18) + "px"; s.style.top = (m.sy + 18) + "px"; }
+  s.style.display = "block";
+}
+
+/* ---------- Speichern ---------- */
+function speichereBald() { clearTimeout(speicherUhr); speicherUhr = setTimeout(speichereJetzt, 700); }
+async function speichereJetzt() {
+  clearTimeout(speicherUhr);
+  S.geaendert = new Date().toISOString();
+  try {
+    const antwort = await fetch("/speichern", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(S) });
+    if (!antwort.ok) throw new Error("Antwort " + antwort.status);
+    el("speicher").className = ""; el("speicher").textContent = "Gespeichert um " + new Date().toLocaleTimeString("de-CH");
+    el("herunterladen").className = "zweit";
+    return true;
+  } catch (fehler) {
+    el("speicher").className = "fehler";
+    el("speicher").textContent = "Nicht gespeichert. Läuft die Zelle „Werkzeug starten“ im Notebook noch?";
+    el("herunterladen").className = "zweit an";
+    return false;
+  }
+}
+el("herunterladen").addEventListener("click", () => {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(S)], { type: "application/json" }));
+  a.download = "ground_truth_hand.json"; a.click();
+});
+
+function zeitZaehlen() {                   // Arbeitszeit je Ausschnitt; Pausen über 60 s zählen nicht
+  if (document.hidden || Date.now() - letzteEingabe > 60000) return;
+  const k = kachel();
+  if (k.status !== "fertig") k.zeit_s = (k.zeit_s || 0) + 1;
+}
+
+window.addEventListener("keydown", taste);
+window.addEventListener("resize", ganzeAnsicht);
+el("weiter").addEventListener("click", () => { weiter(); leinwand.focus(); });
+el("zurueck").addEventListener("click", () => { geheZu(kIdx - 1); leinwand.focus(); });
+el("wechsel").addEventListener("click", () => { zeigeJahr(E.aufnahmen[(E.aufnahmen.indexOf(jahr) + 1) % E.aufnahmen.length]); leinwand.focus(); });
+
+/* ---------- Selbsttest (nur mit ?selbsttest=1): spielt eine kurze Bedienung durch ---------- */
+async function selbsttest() {
+  const warte = ms => new Promise(r => setTimeout(r, ms));
+  const protokoll = [];
+  const pruefe = (name, ok) => protokoll.push((ok ? "OK   " : "FEHLER ") + name);
+  const maus = (art, sx, sy, knopf) => {
+    const r = leinwand.getBoundingClientRect();
+    // wie eine echte Maus über dem Bild: das Ereignis trifft die Zeichenfläche und steigt zum Fenster auf
+    leinwand.dispatchEvent(new MouseEvent(art, { clientX: r.left + sx, clientY: r.top + sy, button: knopf || 0, bubbles: true }));
+  };
+  const druecke = t => window.dispatchEvent(new KeyboardEvent("keydown", { key: t }));
+  try {
+    const nummer = S.kacheln.findIndex(k => !k.blind && S.felder.filter(f => zeigbar(f) && imKern(f, k)).length >= 2);
+    geheZu(nummer); await warte(300);
+    const k = kachel(), meine = S.felder.filter(f => zeigbar(f) && imKern(f, k));
+    const a = meine[0], b = meine[1];
+    // 1) Zustand per Taste ändern
+    let p = weltZuSchirm(a.x, a.y); maus("mousemove", p.sx, p.sy); druecke("3");
+    pruefe("Taste 3 setzt 'unsicher'", a.zustand[jahr] === "unsicher");
+    // 2) Feld verschieben
+    p = weltZuSchirm(b.x, b.y); const altX = b.x;
+    maus("mousedown", p.sx, p.sy); maus("mousemove", p.sx + 30, p.sy + 10); maus("mouseup", p.sx + 30, p.sy + 10);
+    pruefe("Ziehen verschiebt das Feld (" + (b.x - altX).toFixed(2) + " m, erwartet " + (30 / ansicht.s * E.pixel_m).toFixed(2) + " m, Massstab " + ansicht.s.toFixed(3) + ")", Math.abs(b.x - altX - 30 / ansicht.s * E.pixel_m) < 0.02);
+    // 2b) Auswahl mit Rahmen, gemeinsam verschieben, Taste für alle
+    const maus2 = (art, sx, sy) => { const r = leinwand.getBoundingClientRect();
+      leinwand.dispatchEvent(new MouseEvent(art, { clientX: r.left + sx, clientY: r.top + sy, button: 0, shiftKey: true, bubbles: true })); };
+    const n0 = bildPx() * ansicht.s;
+    maus2("mousedown", ansicht.ox + 1, ansicht.oy + 1); maus2("mousemove", ansicht.ox + n0 - 1, ansicht.oy + n0 - 1); maus2("mouseup", ansicht.ox + n0 - 1, ansicht.oy + n0 - 1);
+    const anzahl = S.felder.filter(f => zeigbar(f) && inAnsicht(f, k)).length;
+    pruefe("Rahmen wählt alle " + anzahl + " Felder im Bild", auswahl.size === anzahl && anzahl >= 2);
+    const vorA = a.x, vorB = b.x; p = weltZuSchirm(a.x, a.y);
+    maus("mousedown", p.sx, p.sy); maus("mousemove", p.sx - 20, p.sy); maus("mouseup", p.sx - 20, p.sy);
+    pruefe("Gemeinsames Ziehen verschiebt alle gleich", Math.abs((a.x - vorA) - (b.x - vorB)) < 0.011 && Math.abs(a.x - vorA + 20 / ansicht.s * E.pixel_m) < 0.02);
+    druecke("q"); pruefe("Taste gilt für die ganze Auswahl", a.parkart === "QPU" && b.parkart === "QPU");
+    druecke("Escape"); pruefe("Esc hebt die Auswahl auf", auswahl.size === 0);
+    // 3) neues Feld per Klick (Mitte des Ausschnitts, falls dort kein Feld liegt: sonst etwas daneben)
+    const vorher = S.felder.length; const e0 = ecke(k);
+    let zx = e0.xl + E.rand_m + 3, zy = e0.yo - E.rand_m - 3;
+    p = weltZuSchirm(zx, zy);
+    while (feldBei(p.sx, p.sy)) { zx += 2.5; p = weltZuSchirm(zx, zy); }
+    maus("mousedown", p.sx, p.sy); maus("mouseup", p.sx, p.sy);
+    const neu = S.felder[S.felder.length - 1];
+    pruefe("Klick setzt ein neues Feld", S.felder.length === vorher + 1 && neu.herkunft === "neu" && Math.abs(neu.x - zx) < E.pixel_m / ansicht.s + 0.01);   // genau auf einen Bildschirmpunkt
+    // 4) Abschliessen wird verweigert, solange ein Zustand offen ist
+    druecke("Enter"); pruefe("Enter zeigt das zweite Bild", jahr === E.aufnahmen[1]);
+    druecke("Enter"); pruefe("Abschluss verweigert bei offenem Zustand", k.status !== "fertig" && el("meldung").className === "an");
+    p = weltZuSchirm(neu.x, neu.y); maus("mousemove", p.sx, p.sy); druecke("2");
+    pruefe("Taste 2 im zweiten Bild", neu.zustand[E.aufnahmen[1]] === "verdeckt" && neu.zustand[E.aufnahmen[0]] === "sichtbar");
+    // 5) Rückgängig und Wiederholen
+    druecke("u"); pruefe("U macht rückgängig", S.felder.find(f => f.id === neu.id).zustand[E.aufnahmen[1]] === "offen");
+    p = weltZuSchirm(neu.x, neu.y); maus("mousemove", p.sx, p.sy); druecke("2");
+    // 6) Löschen eines Vorschlags bleibt als "gelöscht" erhalten
+    const c = meine[2];
+    if (c) { p = weltZuSchirm(c.x, c.y); maus("mousemove", p.sx, p.sy); druecke("Delete");
+             pruefe("Entf markiert Vorschlag als gelöscht", S.felder.find(f => f.id === c.id).geloescht === true); }
+    // 6b) Bild wechseln und zurückblättern
+    const vorJahr = jahr; druecke("b"); const nachB = jahr; el("wechsel").click();
+    pruefe("B und Knopf wechseln das Bild hin und zurück", nachB !== vorJahr && jahr === vorJahr);
+    const hier = kIdx; el("zurueck").click(); const davor = kIdx; druecke("ArrowRight");
+    pruefe("Zurück und → blättern", davor === (hier - 1 + S.kacheln.length) % S.kacheln.length && kIdx === hier);
+    druecke("Enter");                                                  // nach dem Blättern beginnt der Ausschnitt wieder beim ersten Bild
+    // 7) Abschliessen und speichern
+    const id = k.id; druecke("Enter"); await warte(900);
+    pruefe("Ausschnitt abgeschlossen", S.kacheln.find(x => x.id === id).status === "fertig");
+    const gespeichert = await (await fetch("/stand")).json();
+    pruefe("Stand liegt beim Notebook", gespeichert.kacheln.find(x => x.id === id).status === "fertig" && gespeichert.felder.some(f => f.id === neu.id));
+    geheZu(S.kacheln.findIndex(x => x.id === id)); await warte(400);
+  } catch (fehler) { protokoll.push("FEHLER Ausnahme: " + fehler.message); }
+  const gut = protokoll.every(z => z.startsWith("OK"));
+  document.title = (gut ? "SELBSTTEST OK " : "SELBSTTEST FEHLER ") + protokoll.length;
+  const pre = document.createElement("pre"); pre.id = "selbsttest"; pre.textContent = protokoll.join("\n");
+  pre.style.cssText = "position:fixed;left:8px;top:60px;background:#000c;color:#fff;padding:8px;font-size:12px;z-index:9";
+  document.body.appendChild(pre);
+}
+
+start().catch(fehler => { el("bildname").textContent = "Der Stand konnte nicht geladen werden"; el("bildhinweis").textContent = "Läuft die Zelle „Werkzeug starten“ im Notebook? (" + fehler.message + ")"; });
+</script>
+</body>
+</html>

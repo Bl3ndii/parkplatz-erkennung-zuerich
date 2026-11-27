@@ -1,0 +1,15 @@
+cff-version: 1.2.0
+message: "Wenn du dieses Projekt verwendest, zitiere es bitte so."
+title: "Parkplatz-Erkennung Zürich: Pilot zur Erkennung von Parkflächen aus Luftbildern (5 cm vs. 10 cm)"
+authors:
+  - alias: Bl3ndii
+version: 0.2.0-alpha
+date-released: 2026-11-27
+license: MIT
+repository-code: "https://github.com/Bl3ndii/parkplatz-erkennung-zuerich"
+keywords:
+  - Parkplätze
+  - Luftbild
+  - Orthofoto
+  - semantische Segmentierung
+  - Zürich
